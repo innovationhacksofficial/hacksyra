@@ -7,7 +7,7 @@ import { razorpay, signTicket } from "@/lib/payments/razorpay";
 import { Errors } from "@/lib/server/api";
 import { audit } from "@/lib/server/audit";
 import { notify, notifyAdmins } from "@/lib/server/notify";
-import { renderEmail, escapeHtml } from "@/lib/email/layout";
+import { escapeHtml } from "@/lib/email/layout";
 import { formatMoney } from "@/lib/domain/money";
 import type { OrderDoc, PaymentDoc } from "@/types/commerce";
 
@@ -191,6 +191,15 @@ export async function finalizeCapturedPayment(params: {
       throw Errors.conflict("Order was already refunded.");
     }
 
+    // Read all conditional docs BEFORE performing any Firestore writes.
+    const hRef = db.collection(COLLECTIONS.HACKATHONS).doc(order.hackathonId);
+    const regId = `${order.hackathonId}_${order.userId}`;
+    const regRef = db.collection(COLLECTIONS.REGISTRATIONS).doc(regId);
+    const [hSnap, regSnap] = await Promise.all([
+      order.kind === "listing_fee" ? tx.get(hRef) : Promise.resolve(null),
+      order.kind !== "listing_fee" ? tx.get(regRef) : Promise.resolve(null),
+    ]);
+
     const now = FieldValue.serverTimestamp();
     tx.update(orderRef, {
       status: "paid",
@@ -239,9 +248,7 @@ export async function finalizeCapturedPayment(params: {
     let ticketId: string | undefined;
 
     if (order.kind === "listing_fee") {
-      const hRef = db.collection(COLLECTIONS.HACKATHONS).doc(order.hackathonId);
-      const hSnap = await tx.get(hRef);
-      if (hSnap.exists) {
+      if (hSnap?.exists) {
         const h = hSnap.data()!;
         const updates: Record<string, unknown> = {
           listingFee: {
@@ -267,11 +274,6 @@ export async function finalizeCapturedPayment(params: {
       );
     } else {
       // Registration payment
-      const regId = `${order.hackathonId}_${order.userId}`;
-      const regRef = db.collection(COLLECTIONS.REGISTRATIONS).doc(regId);
-      const regSnap = await tx.get(regRef);
-      const hRef = db.collection(COLLECTIONS.HACKATHONS).doc(order.hackathonId);
-
       ticketId = `tkt_${nanoid(12)}`;
       let qrCode: string | null = null;
       try {
@@ -332,7 +334,7 @@ export async function finalizeCapturedPayment(params: {
         updatedAt: now,
       });
 
-      if (regSnap.exists) {
+      if (regSnap?.exists) {
         tx.update(regRef, {
           status: "confirmed",
           ticketId,

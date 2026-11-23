@@ -93,7 +93,7 @@ export const POST = route<z.infer<typeof Body>, { id: string }>(
     }
 
     await audit({ actorId: user!.uid, action: "certificates.bulk_issued", resource: "certificates", resourceId: params.id, metadata: { issued, audience: body.audience }, req });
-    return { ok: true, issued, totalMatched: targets.size };
+    return { ok: true, count: issued, issued, totalMatched: targets.size };
   }
 );
 

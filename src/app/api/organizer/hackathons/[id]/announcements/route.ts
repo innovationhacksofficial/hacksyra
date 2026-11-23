@@ -60,7 +60,7 @@ export const POST = route<z.infer<typeof Body>, { id: string }>(
     }
 
     await audit({ actorId: user!.uid, action: "hackathon.announcement_posted", resource: "hackathons", resourceId: params.id, metadata: { aid, recipients: regs.size }, req });
-    return { ok: true, id: aid, recipients: regs.size };
+    return { ok: true, id: aid, notified: regs.size, recipients: regs.size };
   }
 );
 

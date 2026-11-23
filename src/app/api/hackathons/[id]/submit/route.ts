@@ -61,25 +61,29 @@ export const POST = route<{ id: string } extends never ? never : undefined, { id
       h.technologies ?? []
     );
 
-    // Reserve slug atomically & write tiers/coupons cleanly
+    // Reserve slug atomically & write tiers/coupons cleanly (ALL reads before ALL writes!)
     await db.runTransaction(async (tx) => {
       const slugRef = db.collection(COLLECTIONS.SLUGS).doc(desiredSlug);
-      const slugSnap = await tx.get(slugRef);
+      const oldSlug = h.reservedSlug as string | undefined;
+      const oldRef = oldSlug && oldSlug !== desiredSlug ? db.collection(COLLECTIONS.SLUGS).doc(oldSlug) : null;
+
+      const [slugSnap, oldSnap, prevTiers, prevCoupons] = await Promise.all([
+        tx.get(slugRef),
+        oldRef ? tx.get(oldRef) : Promise.resolve(null),
+        tx.get(db.collection(COLLECTIONS.TICKET_TIERS).where("hackathonId", "==", hid)),
+        tx.get(db.collection(COLLECTIONS.COUPONS).where("hackathonId", "==", hid)),
+      ]);
+
       if (slugSnap.exists && slugSnap.data()?.hackathonId !== hid) {
         throw Errors.conflict("That URL slug was just claimed by another hackathon. Choose a different slug in Step 1.");
       }
-      // release previous slug if renamed
-      const oldSlug = h.reservedSlug as string | undefined;
-      if (oldSlug && oldSlug !== desiredSlug) {
-        const oldRef = db.collection(COLLECTIONS.SLUGS).doc(oldSlug);
-        const oldSnap = await tx.get(oldRef);
-        if (oldSnap.exists && oldSnap.data()?.hackathonId === hid) tx.delete(oldRef);
+      if (oldRef && oldSnap?.exists && oldSnap.data()?.hackathonId === hid) {
+        tx.delete(oldRef);
       }
       tx.set(slugRef, { hackathonId: hid, updatedAt: FieldValue.serverTimestamp() });
 
       const now = FieldValue.serverTimestamp();
       // Materialize ticket tiers (isPublic=false until admin approves)
-      const prevTiers = await tx.get(db.collection(COLLECTIONS.TICKET_TIERS).where("hackathonId", "==", hid));
       prevTiers.docs.forEach((d) => tx.delete(d.ref));
 
       if (!pricing.isFree) {
@@ -110,7 +114,6 @@ export const POST = route<{ id: string } extends never ? never : undefined, { id
       }
 
       // Materialize coupons in server-only collection; clear coupons from public hackathon doc
-      const prevCoupons = await tx.get(db.collection(COLLECTIONS.COUPONS).where("hackathonId", "==", hid));
       prevCoupons.docs.forEach((d) => tx.delete(d.ref));
       for (const c of pricing.coupons ?? []) {
         const cid = c.id || `cpn_${nanoid(10)}`;

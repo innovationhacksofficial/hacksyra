@@ -3,6 +3,8 @@ import { adminAuth, adminDb, FieldValue } from "@/lib/firebase/admin";
 import { COLLECTIONS, DOCS } from "@/lib/firebase/collections";
 import { normalizeRole } from "@/lib/auth/roles";
 import { serverEnv } from "@/lib/env";
+import { sendEmail } from "@/lib/email/send";
+import { welcomeEmail } from "@/lib/email/templates";
 import type { UserRole } from "@/types";
 
 export function sanitizeUsername(raw: string): string {
@@ -131,6 +133,11 @@ export async function bootstrapUser(params: {
 
   if (normalizeRole(rec.customClaims?.role) !== role || !rec.customClaims?.role) {
     await auth.setCustomUserClaims(params.uid, { ...(rec.customClaims ?? {}), role });
+  }
+
+  if (result.created && email) {
+    const mail = welcomeEmail({ name: displayName, role, username: result.username });
+    void sendEmail({ to: email, subject: mail.subject, html: mail.html, tag: "welcome" });
   }
 
   return { role, ...result };
