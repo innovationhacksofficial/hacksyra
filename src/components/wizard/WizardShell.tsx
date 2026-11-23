@@ -16,7 +16,7 @@ import {
 import { api } from "@/lib/api-client";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useMyHackathons } from "@/lib/data/hooks";
-import { EDITABLE_STATUSES } from "@/lib/domain/status";
+import { EDITABLE_STATUSES, isLive } from "@/lib/domain/status";
 import { Button, EmptyState, ErrorState, PageHeader, Skeleton, StatusBadge, useToast } from "@/components/ui";
 import { useHackathonDraft } from "./useHackathonDraft";
 import { Step1Basics, Step2Details, Step3Location, Step4Timeline } from "./Step1To4";
@@ -42,7 +42,7 @@ export function WizardShell() {
   const { firebaseUser } = useAuth();
 
   const { data: myEvents, isLoading: listLoading } = useMyHackathons(draftId ? null : firebaseUser?.uid);
-  const { draft, isLoading, error, saveState, queuePatch, flush } = useHackathonDraft(draftId);
+  const { draft, isLoading, error, saveState, liveMode, queuePatch, flush } = useHackathonDraft(draftId);
 
   const [step, setStep] = useState(1);
   const [creating, setCreating] = useState(false);
@@ -68,7 +68,8 @@ export function WizardShell() {
     const clamped = Math.max(1, Math.min(9, next));
     if (draft) {
       const done = Array.from(new Set([...(draft.completedSteps ?? []), step])).filter((s) => s >= 1 && s <= 9);
-      queuePatch({ completedSteps: done, completionPercentage: Math.round((done.length / 9) * 100) }, true);
+      // For drafts, flush step progress immediately; for live hackathons, stage it until Save Live Changes.
+      queuePatch({ completedSteps: done, completionPercentage: Math.round((done.length / 9) * 100) }, !liveMode);
     }
     setStep(clamped);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -165,6 +166,11 @@ export function WizardShell() {
               <Loader2 size={13} className="animate-spin" /> Saving...
             </span>
           )}
+          {saveState === "dirty" && (
+            <Button size="sm" onClick={() => void flush()}>
+              Save Live Changes
+            </Button>
+          )}
           {saveState === "saved" && (
             <span className="inline-flex items-center gap-1.5 text-emerald-700">
               <Cloud size={14} /> Saved
@@ -182,6 +188,12 @@ export function WizardShell() {
           )}
         </div>
       </div>
+
+      {isLive(draft.status) && (
+        <div className="rounded-2xl border border-[#B3D1FF] bg-[#EEF4FF] px-4 py-3 text-xs text-slate-700">
+          <strong>Live event edit mode:</strong> Updating minor items (FAQ, schedule, media, support channel) takes effect immediately. Changing dates, rules, prizes, or mode automatically queues a quick admin re-review.
+        </div>
+      )}
 
       {/* Mobile scrollable step pills */}
       <div className="lg:hidden flex items-center gap-1.5 overflow-x-auto scrollbar-none pb-1">

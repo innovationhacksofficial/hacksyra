@@ -1,377 +1,222 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
-import Image from "next/image";
-import {
-  Search, Filter, Trophy, Star, ThumbsUp, Github,
-  Globe, Video, Code2, Sparkles, ExternalLink, ArrowRight, Eye,
-  Heart, Layers, UserCheck
-} from "lucide-react";
+import { useMemo, useState } from "react";
+import { addDoc, collection, limit, orderBy, query, serverTimestamp, where } from "firebase/firestore";
+import { Code2, Heart, Search, ExternalLink, Github, Video, MessageSquare, Send } from "lucide-react";
+import { clientDb, firebaseReady } from "@/lib/firebase/client";
+import { COLLECTIONS } from "@/lib/firebase/collections";
+import { useAuth } from "@/components/providers/AuthProvider";
+import { useLiveQuery } from "@/lib/data/live";
+import { api } from "@/lib/api-client";
+import { formatInZone, toDate } from "@/lib/domain/dates";
+import { Button, EmptyState, Input, Modal, NotConfigured, CardSkeleton, useToast } from "@/components/ui";
+import { Markdown } from "@/components/common/Markdown";
+import type { Project } from "@/types";
 
-interface ShowcaseProject {
-  id: string;
-  title: string;
-  tagline: string;
-  coverImage: string;
-  hackathon: string;
-  hackathonSlug: string;
-  award?: string;
-  author: {
-    name: string;
-    avatar: string;
-    college: string;
-  };
-  track: string;
-  techStack: string[];
-  upvotes: number;
-  githubUrl: string;
-  demoUrl: string;
-  videoUrl?: string;
-}
+type CommentDoc = { authorId: string; authorName: string; body: string; createdAt: unknown };
 
-const SHOWCASE_PROJECTS: ShowcaseProject[] = [
-  {
-    id: "proj-1",
-    title: "NeuroPulse — Multimodal ICU Telemetry",
-    tagline: "Autonomous clinical intelligence agent predicting septic shock 6 hours ahead using continuous waveform telemetry.",
-    coverImage: "https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?w=800&auto=format&fit=crop&q=80",
-    hackathon: "India AI Innovation Challenge 2026",
-    hackathonSlug: "india-ai-2026",
-    award: "Grand Champion (1st)",
-    author: {
-      name: "NeuralSynthetix (Aarav, Neha, Rohan)",
-      avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80",
-      college: "IIT Bombay",
-    },
-    track: "Generative AI",
-    techStack: ["Next.js 15", "PyTorch", "FastAPI", "WebSockets"],
-    upvotes: 384,
-    githubUrl: "https://github.com/hacksyra/neuropulse-icu",
-    demoUrl: "https://neuropulse-icu.vercel.app",
-    videoUrl: "https://youtube.com",
-  },
-  {
-    id: "proj-2",
-    title: "AetherShield — Zero-Knowledge Identity Bridge",
-    tagline: "Cryptographic protocol allowing users to prove age, citizenship, and residency without disclosing raw PII.",
-    coverImage: "https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=800&auto=format&fit=crop&q=80",
-    hackathon: "Web3 Builders Summit",
-    hackathonSlug: "web3-summit-2026",
-    award: "1st Place Winner ($10,000)",
-    author: {
-      name: "ZeroState Labs (Elena, Tariq)",
-      avatar: "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100&auto=format&fit=crop&q=80",
-      college: "TU Munich & BITS Pilani",
-    },
-    track: "Web3",
-    techStack: ["Circom", "SnarkJS", "Solidity", "Foundry", "Polygon"],
-    upvotes: 512,
-    githubUrl: "https://github.com/hacksyra/aethershield-zk",
-    demoUrl: "https://aethershield.id",
-    videoUrl: "https://youtube.com",
-  },
-  {
-    id: "proj-3",
-    title: "EcoGrid — Dynamic EV Fleet Balancing",
-    tagline: "Decentralized energy dispatcher rerouting 4,000+ public EV chargers to solar microgrids during demand spikes.",
-    coverImage: "https://images.unsplash.com/photo-1558441719-74e1d16715f0?w=800&auto=format&fit=crop&q=80",
-    hackathon: "CleanTech & Smart Mobility Hackathon",
-    hackathonSlug: "cleantech-mobility-2026",
-    award: "Best Sustainability Solution",
-    author: {
-      name: "VoltFlow Core (Dev, Preethi)",
-      avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80",
-      college: "Stanford & IIT Delhi",
-    },
-    track: "CleanTech",
-    techStack: ["Python", "Reinforcement Learning", "React", "Mapbox"],
-    upvotes: 279,
-    githubUrl: "https://github.com/hacksyra/ecogrid-optimizer",
-    demoUrl: "https://ecogrid.dev",
-  },
-  {
-    id: "proj-4",
-    title: "VocalForge — Multilingual Indic Code Synthesis",
-    tagline: "Speech-to-executable architecture allowing developers to dictate complex full-stack code in Hindi, Tamil, and Telugu.",
-    coverImage: "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800&auto=format&fit=crop&q=80",
-    hackathon: "India AI Innovation Challenge 2026",
-    hackathonSlug: "india-ai-2026",
-    award: "Best Language Innovation",
-    author: {
-      name: "IndicAI Core (Sneha, Arjun)",
-      avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=80",
-      college: "IIIT Hyderabad",
-    },
-    track: "Generative AI",
-    techStack: ["Whisper-Large", "Transformers", "FastAPI", "Next.js"],
-    upvotes: 420,
-    githubUrl: "https://github.com/hacksyra/vocalforge",
-    demoUrl: "https://vocalforge.ai",
-  },
-  {
-    id: "proj-5",
-    title: "RustMemSafe — Kernel Sandbox for WebAssembly",
-    tagline: "High-throughput deterministic sandbox executing untrusted tenant code with sub-millisecond cold starts.",
-    coverImage: "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=800&auto=format&fit=crop&q=80",
-    hackathon: "Systems Hackathon 2026",
-    hackathonSlug: "global-open-2026",
-    award: "1st Place Systems Track",
-    author: {
-      name: "Liam & Marcus",
-      avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&auto=format&fit=crop&q=80",
-      college: "NUS Singapore",
-    },
-    track: "Systems",
-    techStack: ["Rust", "Wasmtime", "eBPF", "Linux C"],
-    upvotes: 360,
-    githubUrl: "https://github.com/hacksyra/rustmemsafe",
-    demoUrl: "https://wasm-sandbox.dev",
-  },
-  {
-    id: "proj-6",
-    title: "AgriVision — Drone Thermal Crop Diagnostic",
-    tagline: "Edge-computed aerial crop health diagnostics identifying pest infestations 14 days before visible leaf discoloration.",
-    coverImage: "https://images.unsplash.com/photo-1508614589041-895b88991e3e?w=800&auto=format&fit=crop&q=80",
-    hackathon: "CleanTech & Smart Mobility Hackathon",
-    hackathonSlug: "cleantech-mobility-2026",
-    award: "Agriculture Impact Prize",
-    author: {
-      name: "AgriEdge Team",
-      avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80",
-      college: "IIT Madras",
-    },
-    track: "CleanTech",
-    techStack: ["YOLOv10", "TensorRT", "Flutter", "GCP"],
-    upvotes: 215,
-    githubUrl: "https://github.com/hacksyra/agrivision-drone",
-    demoUrl: "https://agrivision.in",
-  },
-];
+export default function ProjectsGalleryPage() {
+  const { firebaseUser, user, notConfigured } = useAuth();
+  const toast = useToast();
+  const [search, setSearch] = useState("");
+  const [techFilter, setTechFilter] = useState("all");
+  const [selected, setSelected] = useState<Project | null>(null);
+  const [commentText, setCommentText] = useState("");
+  const [posting, setPosting] = useState(false);
 
-export default function ProjectsShowcasePage() {
-  const [selectedTrack, setSelectedTrack] = useState<string>("All");
-  const [search, setSearch] = useState<string>("");
-  const [upvotesMap, setUpvotesMap] = useState<Record<string, number>>(
-    Object.fromEntries(SHOWCASE_PROJECTS.map((p) => [p.id, p.upvotes]))
+  const { data: projects, isLoading } = useLiveQuery<Project>(["public-projects"], () =>
+    query(
+      collection(clientDb(), COLLECTIONS.PROJECTS),
+      where("isPublic", "==", true),
+      where("status", "==", "published"),
+      orderBy("likesCount", "desc"),
+      limit(80)
+    )
   );
-  const [hasVoted, setHasVoted] = useState<Record<string, boolean>>({});
 
-  const tracks = ["All", "Generative AI", "Web3", "CleanTech", "Systems"];
+  const { data: comments } = useLiveQuery<CommentDoc>(
+    ["project-comments", selected?.id ?? null],
+    selected?.id
+      ? () => query(collection(clientDb(), COLLECTIONS.PROJECTS, selected.id, "comments"), orderBy("createdAt", "desc"))
+      : null
+  );
 
-  function handleVote(id: string) {
-    if (hasVoted[id]) {
-      setUpvotesMap((prev) => ({ ...prev, [id]: prev[id] - 1 }));
-      setHasVoted((prev) => ({ ...prev, [id]: false }));
-    } else {
-      setUpvotesMap((prev) => ({ ...prev, [id]: prev[id] + 1 }));
-      setHasVoted((prev) => ({ ...prev, [id]: true }));
+  const allTechs = useMemo(() => {
+    const s = new Set<string>();
+    (projects ?? []).forEach((p) => (p.technologies ?? []).forEach((t) => s.add(t)));
+    return Array.from(s).slice(0, 12);
+  }, [projects]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return (projects ?? []).filter((p) => {
+      if (techFilter !== "all" && !(p.technologies ?? []).includes(techFilter)) return false;
+      if (q && !`${p.title} ${p.tagline ?? ""} ${(p.technologies ?? []).join(" ")}`.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [projects, search, techFilter]);
+
+  async function toggleLike(e: React.MouseEvent, projectId: string) {
+    e.stopPropagation();
+    if (!firebaseUser) {
+      toast.info("Sign in to like projects");
+      return;
+    }
+    try {
+      await api(`/api/projects/${projectId}/like`, { method: "POST", body: {} });
+    } catch {
+      toast.error("Couldn't update like");
     }
   }
 
-  const filtered = SHOWCASE_PROJECTS.filter((p) => {
-    const matchesTrack = selectedTrack === "All" || p.track === selectedTrack;
-    const matchesSearch =
-      p.title.toLowerCase().includes(search.toLowerCase()) ||
-      p.tagline.toLowerCase().includes(search.toLowerCase()) ||
-      p.techStack.some((t) => t.toLowerCase().includes(search.toLowerCase())) ||
-      p.author.name.toLowerCase().includes(search.toLowerCase());
-    return matchesTrack && matchesSearch;
-  });
+  async function addComment(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selected || !firebaseUser || !firebaseReady() || !commentText.trim()) return;
+    setPosting(true);
+    try {
+      await addDoc(collection(clientDb(), COLLECTIONS.PROJECTS, selected.id, "comments"), {
+        authorId: firebaseUser.uid,
+        authorName: user?.displayName || firebaseUser.displayName || "Builder",
+        body: commentText.trim(),
+        createdAt: serverTimestamp(),
+      });
+      setCommentText("");
+    } catch {
+      toast.error("Couldn't post comment");
+    } finally {
+      setPosting(false);
+    }
+  }
 
   return (
-    <div className="bg-[#F8FAFC] min-h-screen pb-20">
-      {/* Devpost-Style Header Banner */}
-      <div className="bg-white border-b border-slate-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 text-center">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-[#1565D8] text-xs font-bold border border-blue-100 mb-3">
-            <Sparkles size={13} />
-            Community Project Showcase
-          </div>
-          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-display font-black text-slate-900 tracking-tight leading-tight">
-            Built by Developers. Shipped to the World.
-          </h1>
-          <p className="text-slate-600 text-sm sm:text-base max-w-2xl mx-auto mt-3">
-            Explore hundreds of working software prototypes built in 48-hour hackathons on HACKSYRA. Inspect source code, launch live demos, and upvote your favorite engineering.
-          </p>
-
-          {/* Devpost Filter & Search Toolbar */}
-          <div className="mt-8 max-w-3xl mx-auto flex flex-col sm:flex-row items-center gap-3">
-            <div className="relative flex-1 w-full">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="Search projects by name, technology, challenge..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white text-slate-900 text-sm placeholder:text-slate-400 focus:outline-none focus:border-[#1565D8] focus:ring-2 focus:ring-blue-50 transition-all shadow-xs"
-              />
-            </div>
-
-            <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto scrollbar-none">
-              {tracks.map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setSelectedTrack(t)}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
-                    selectedTrack === t
-                      ? "bg-[#1565D8] text-white shadow-xs font-bold"
-                      : "bg-white border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50"
-                  }`}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-          </div>
+    <div className="container-app py-8 sm:py-10 space-y-6">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div>
+          <span className="section-tag">Showcase</span>
+          <h1 className="font-display font-bold text-3xl sm:text-4xl text-slate-900">Project Gallery</h1>
+          <p className="text-sm sm:text-base text-slate-600 mt-1">Real builds shipped at HACKSYRA hackathons.</p>
         </div>
+        <Button href="/dashboard/projects">Publish Your Project</Button>
       </div>
 
-      {/* Projects Grid (Devpost Software Gallery Card Style) */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
-        <div className="flex items-center justify-between mb-6">
-          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-            Showing {filtered.length} Projects
-          </span>
-          <Link
-            href="/hackathons"
-            className="text-xs font-bold text-[#1565D8] hover:underline flex items-center gap-1"
-          >
-            Find a Hackathon to submit your project →
-          </Link>
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex-1">
+          <Input placeholder="Search projects or technologies..." leftAdornment={<Search size={16} />} value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
+        <select value={techFilter} onChange={(e) => setTechFilter(e.target.value)} className="input sm:w-48">
+          <option value="all">All technologies</option>
+          {allTechs.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+      </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filtered.map((project) => (
-            <div
-              key={project.id}
-              className="bg-white border border-slate-200 rounded-2xl overflow-hidden hover:border-[#1565D8]/40 hover:shadow-lg transition-all duration-300 flex flex-col group"
-            >
-              {/* Cover Image & Badges */}
-              <div className="relative h-48 w-full overflow-hidden bg-slate-100">
-                <Image
-                  src={project.coverImage}
-                  alt={project.title}
-                  fill
-                  className="object-cover group-hover:scale-105 transition-transform duration-500"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent" />
-
-                {/* Award Badge */}
-                {project.award && (
-                  <div className="absolute top-3 left-3">
-                    <span className="px-2.5 py-1 rounded-full bg-amber-500 text-white text-[10px] font-extrabold flex items-center gap-1 shadow-sm">
-                      <Trophy size={11} /> {project.award}
-                    </span>
-                  </div>
-                )}
-
-                {/* Track Badge */}
-                <div className="absolute top-3 right-3">
-                  <span className="px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-sm text-white text-[10px] font-bold">
-                    {project.track}
-                  </span>
-                </div>
-
-                {/* Submitted To Hackathon */}
-                <div className="absolute bottom-3 left-3 right-3">
-                  <Link
-                    href={`/hackathons/${project.hackathonSlug}`}
-                    className="text-white/90 text-xs font-semibold hover:text-white hover:underline flex items-center gap-1 truncate"
+      {notConfigured ? (
+        <NotConfigured service="Firestore" />
+      ) : isLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          <CardSkeleton />
+          <CardSkeleton />
+          <CardSkeleton />
+        </div>
+      ) : filtered.length === 0 ? (
+        <EmptyState icon={<Code2 size={22} />} title="No projects published yet" description="Be the first builder to publish a project!" action={<Button href="/dashboard/projects">Create Project</Button>} />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {filtered.map((p) => (
+            <div key={p.id} onClick={() => setSelected(p)} className="card-hover p-5 flex flex-col justify-between gap-3">
+              <div>
+                <div className="flex items-start justify-between gap-2">
+                  <h3 className="font-display font-bold text-lg text-slate-900 line-clamp-1">{p.title}</h3>
+                  <button
+                    type="button"
+                    onClick={(e) => void toggleLike(e, p.id)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-50 text-rose-600 text-xs font-bold hover:bg-rose-100 shrink-0"
                   >
-                    <span>{project.hackathon}</span>
-                    <ExternalLink size={11} className="flex-shrink-0" />
-                  </Link>
+                    <Heart size={13} /> {p.likesCount ?? 0}
+                  </button>
                 </div>
+                {p.tagline && <p className="text-xs sm:text-sm text-slate-600 line-clamp-2 mt-1">{p.tagline}</p>}
               </div>
-
-              {/* Content Body */}
-              <div className="p-5 flex-1 flex flex-col justify-between">
-                <div>
-                  <h3 className="font-display font-bold text-slate-900 text-base leading-snug group-hover:text-[#1565D8] transition-colors line-clamp-1 mb-1.5">
-                    {project.title}
-                  </h3>
-
-                  <p className="text-slate-600 text-xs leading-relaxed line-clamp-2 mb-4">
-                    {project.tagline}
-                  </p>
-
-                  {/* Tech Stack Pills */}
-                  <div className="flex flex-wrap gap-1 mb-4">
-                    {project.techStack.map((tech) => (
-                      <span
-                        key={tech}
-                        className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px] font-semibold"
-                      >
-                        {tech}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Author & Action Footer */}
-                <div className="pt-4 border-t border-slate-100 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Image
-                      src={project.author.avatar}
-                      alt={project.author.name}
-                      width={28}
-                      height={28}
-                      className="rounded-full object-cover border border-slate-200"
-                    />
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold text-slate-900 truncate">
-                        {project.author.name}
-                      </p>
-                      <p className="text-[10px] text-slate-400 truncate">
-                        {project.author.college}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Upvote & Links */}
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                    <button
-                      onClick={() => handleVote(project.id)}
-                      className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold border transition-all ${
-                        hasVoted[project.id]
-                          ? "bg-red-50 text-red-600 border-red-200"
-                          : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-                      }`}
-                    >
-                      <Heart
-                        size={12}
-                        className={hasVoted[project.id] ? "fill-red-600 text-red-600" : ""}
-                      />
-                      <span>{upvotesMap[project.id]}</span>
-                    </button>
-
-                    <a
-                      href={project.githubUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:text-slate-900 hover:bg-slate-50"
-                      title="GitHub Repository"
-                    >
-                      <Github size={13} />
-                    </a>
-
-                    <a
-                      href={project.demoUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-1.5 rounded-lg bg-[#1565D8] text-white hover:bg-[#0F52B0]"
-                      title="Live Demo"
-                    >
-                      <ArrowRight size={13} />
-                    </a>
-                  </div>
-                </div>
+              <div className="flex flex-wrap gap-1.5 pt-2 border-t border-slate-100">
+                {(p.technologies ?? []).slice(0, 4).map((t) => (
+                  <span key={t} className="px-2 py-0.5 rounded bg-[#EEF4FF] text-[#1565D8] text-[11px] font-semibold">
+                    {t}
+                  </span>
+                ))}
               </div>
             </div>
           ))}
         </div>
-      </div>
+      )}
+
+      <Modal open={!!selected} onClose={() => setSelected(null)} title={selected?.title} maxWidth="max-w-2xl">
+        {selected && (
+          <div className="space-y-5">
+            {selected.tagline && <p className="text-sm font-medium text-slate-700">{selected.tagline}</p>}
+            <div className="flex flex-wrap gap-2">
+              {selected.liveUrl && (
+                <a href={selected.liveUrl} target="_blank" rel="noopener noreferrer" className="btn-primary btn-sm">
+                  <ExternalLink size={13} /> Live Demo
+                </a>
+              )}
+              {selected.repositoryUrl && (
+                <a href={selected.repositoryUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary btn-sm">
+                  <Github size={13} /> Source Code
+                </a>
+              )}
+              {selected.demoVideoUrl && (
+                <a href={selected.demoVideoUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary btn-sm">
+                  <Video size={13} /> Video Pitch
+                </a>
+              )}
+            </div>
+
+            <Markdown content={selected.description} />
+
+            {[
+              ["Inspiration", selected.inspiration],
+              ["How we built it", selected.howItWorks],
+              ["Challenges", selected.challenges],
+              ["What's next", selected.futurePlans],
+            ]
+              .filter(([, text]) => Boolean(text))
+              .map(([heading, text]) => (
+                <div key={String(heading)} className="pt-3 border-t border-slate-100">
+                  <h4 className="font-display font-bold text-sm text-slate-900 mb-1">{heading}</h4>
+                  <p className="text-xs sm:text-sm text-slate-600 whitespace-pre-wrap">{text}</p>
+                </div>
+              ))}
+
+            <div className="pt-4 border-t border-slate-200 space-y-3">
+              <h4 className="font-display font-bold text-sm text-slate-900 flex items-center gap-1.5">
+                <MessageSquare size={15} /> Comments ({comments?.length ?? 0})
+              </h4>
+              {firebaseUser && (
+                <form onSubmit={addComment} className="flex gap-2">
+                  <Input placeholder="Leave feedback..." value={commentText} onChange={(e) => setCommentText(e.target.value)} />
+                  <Button type="submit" size="sm" loading={posting} leftIcon={<Send size={13} />}>
+                    Post
+                  </Button>
+                </form>
+              )}
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {(comments ?? []).map((c, idx) => (
+                  <div key={idx} className="p-3 rounded-xl bg-slate-50 text-xs space-y-0.5">
+                    <div className="flex justify-between">
+                      <span className="font-bold text-slate-900">{c.authorName}</span>
+                      <span className="text-slate-400">{formatInZone(toDate(c.createdAt as never))}</span>
+                    </div>
+                    <p className="text-slate-700">{c.body}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

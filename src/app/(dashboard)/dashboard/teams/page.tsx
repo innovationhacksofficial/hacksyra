@@ -1,314 +1,461 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { collection, doc, orderBy, query, where } from "firebase/firestore";
+import { Crown, KeyRound, LogOut, Mail, MessageSquare, Plus, UserPlus, Users } from "lucide-react";
+import { clientDb, firebaseReady } from "@/lib/firebase/client";
+import { COLLECTIONS } from "@/lib/firebase/collections";
+import { useAuth } from "@/components/providers/AuthProvider";
+import { useLiveDoc, useLiveQuery } from "@/lib/data/live";
+import { api } from "@/lib/api-client";
 import {
-  Users, UserPlus, Copy, Check, Sparkles, Search, Filter,
-  Shield, Github, Mail, ExternalLink, Code2, MessageSquare
-} from "lucide-react";
+  Button,
+  CardSkeleton,
+  ConfirmDialog,
+  CopyButton,
+  EmptyState,
+  Input,
+  Modal,
+  NotConfigured,
+  PageHeader,
+  StatusBadge,
+  Tabs,
+  Textarea,
+  useToast,
+} from "@/components/ui";
+import type { Registration, TeamInvitation, TeamWithEvent } from "@/types";
 
-interface TeamMember {
-  name: string;
-  role: string;
-  avatar: string;
-  github: string;
-  skills: string[];
+function TeamSecretCode({ teamId }: { teamId: string }) {
+  const { data: meta } = useLiveDoc<{ inviteCode?: string }>(
+    ["team-meta", teamId],
+    firebaseReady() ? () => doc(clientDb(), COLLECTIONS.TEAMS, teamId, "private", "meta") : null
+  );
+  if (!meta?.inviteCode) return null;
+  return (
+    <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+      <div>
+        <span className="text-slate-500 mr-1.5">Invite code:</span>
+        <span className="font-mono font-bold text-[#1565D8] tracking-wider">{meta.inviteCode}</span>
+      </div>
+      <CopyButton value={meta.inviteCode} label="Copy" />
+    </div>
+  );
 }
 
-interface Team {
-  id: string;
-  name: string;
-  hackathon: string;
-  track: string;
-  inviteCode: string;
-  maxMembers: number;
-  members: TeamMember[];
-}
+function TeamsInner() {
+  const { firebaseUser, notConfigured } = useAuth();
+  const params = useSearchParams();
+  const toast = useToast();
+  const uid = firebaseUser?.uid;
+  const email = (firebaseUser?.email ?? "").toLowerCase();
+  const ready = Boolean(uid && firebaseReady());
 
-interface AvailableBuilder {
-  id: string;
-  name: string;
-  title: string;
-  college: string;
-  avatar: string;
-  skills: string[];
-  matchRate: number;
-}
+  const [tab, setTab] = useState("my");
+  const [joinCode, setJoinCode] = useState(params.get("code") ?? "");
+  const [joining, setJoining] = useState(false);
 
-const DEMO_MY_TEAMS: Team[] = [
-  {
-    id: "team-1",
-    name: "NeuralSynthetix",
-    hackathon: "India AI Innovation Challenge 2026",
-    track: "Generative AI & LLMs",
-    inviteCode: "NS-9482",
-    maxMembers: 4,
-    members: [
-      {
-        name: "Aarav Sharma (You)",
-        role: "Team Lead & ML Architect",
-        avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80",
-        github: "aarav-dev",
-        skills: ["PyTorch", "FastAPI", "LangChain"],
-      },
-      {
-        name: "Neha Sundaram",
-        role: "Frontend & Design",
-        avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=80",
-        github: "nehasun",
-        skills: ["Next.js 15", "Tailwind CSS", "Figma"],
-      },
-      {
-        name: "Rohan Varma",
-        role: "Backend & DevOps",
-        avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80",
-        github: "rohan-v",
-        skills: ["Docker", "PostgreSQL", "Go"],
-      },
-    ],
-  },
-];
+  const [createOpen, setCreateOpen] = useState(false);
+  const [hackathonId, setHackathonId] = useState("");
+  const [teamName, setTeamName] = useState("");
+  const [teamDesc, setTeamDesc] = useState("");
+  const [skillsInput, setSkillsInput] = useState("");
+  const [looking, setLooking] = useState(true);
+  const [creating, setCreating] = useState(false);
 
-const AVAILABLE_BUILDERS: AvailableBuilder[] = [
-  {
-    id: "b-1",
-    name: "Vikram Malhotra",
-    title: "CUDA & Systems Engineer",
-    college: "IIT Madras",
-    avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&auto=format&fit=crop&q=80",
-    skills: ["C++", "CUDA", "TensorRT", "Python"],
-    matchRate: 96,
-  },
-  {
-    id: "b-2",
-    name: "Ishita Roy",
-    title: "AI Product Designer",
-    college: "NID Ahmedabad",
-    avatar: "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100&auto=format&fit=crop&q=80",
-    skills: ["Figma", "Design Systems", "User Research", "Next.js"],
-    matchRate: 91,
-  },
-  {
-    id: "b-3",
-    name: "Tanmay Bansal",
-    title: "Full-Stack Web3 Builder",
-    college: "BITS Goa",
-    avatar: "https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=100&auto=format&fit=crop&q=80",
-    skills: ["TypeScript", "Solidity", "Node.js", "GraphQL"],
-    matchRate: 85,
-  },
-];
+  const [inviteTeam, setInviteTeam] = useState<TeamWithEvent | null>(null);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviting, setInviting] = useState(false);
 
-export default function TeamsPage() {
-  const [copiedCode, setCopiedCode] = useState<string | null>(null);
-  const [invitedBuilders, setInvitedBuilders] = useState<string[]>([]);
-  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [leavingTeam, setLeavingTeam] = useState<TeamWithEvent | null>(null);
+  const [leaving, setLeaving] = useState(false);
 
-  function copyInvite(code: string) {
-    navigator.clipboard.writeText(code);
-    setCopiedCode(code);
-    setTimeout(() => setCopiedCode(null), 2000);
+  const [transferTeam, setTransferTeam] = useState<TeamWithEvent | null>(null);
+  const [newCaptainId, setNewCaptainId] = useState("");
+  const [transferring, setTransferring] = useState(false);
+
+  useEffect(() => {
+    const codeParam = params.get("code");
+    if (codeParam) setJoinCode(codeParam);
+  }, [params]);
+
+  const { data: myTeams, isLoading: teamsLoading } = useLiveQuery<TeamWithEvent>(
+    ["my-teams", uid ?? null],
+    ready ? () => query(collection(clientDb(), COLLECTIONS.TEAMS), where("memberIds", "array-contains", uid), orderBy("createdAt", "desc")) : null
+  );
+
+  const { data: myRegs } = useLiveQuery<Registration>(
+    ["my-regs-for-teams", uid ?? null],
+    ready ? () => query(collection(clientDb(), COLLECTIONS.REGISTRATIONS), where("userId", "==", uid), orderBy("createdAt", "desc")) : null
+  );
+
+  const { data: myInvites } = useLiveQuery<TeamInvitation>(
+    ["my-invites", email],
+    ready && email ? () => query(collection(clientDb(), COLLECTIONS.TEAM_INVITATIONS), where("inviteeEmail", "==", email)) : null
+  );
+
+  const eligibleRegs = (myRegs ?? []).filter((r) => ["confirmed", "checked_in"].includes(r.status) && !r.teamId);
+  const pendingInvites = (myInvites ?? []).filter((i) => i.status === "pending");
+
+  async function handleJoinByCode(codeToUse: string) {
+    if (!codeToUse.trim()) return;
+    setJoining(true);
+    try {
+      await api("/api/teams/join", { method: "POST", body: { inviteCode: codeToUse.trim().toUpperCase() } });
+      toast.success("Joined team!");
+      setJoinCode("");
+    } catch (e) {
+      toast.error("Couldn't join team", e instanceof Error ? e.message : undefined);
+    } finally {
+      setJoining(false);
+    }
   }
 
-  function inviteBuilder(id: string) {
-    setInvitedBuilders([...invitedBuilders, id]);
+  async function handleCreateTeam(e: React.FormEvent) {
+    e.preventDefault();
+    if (!hackathonId || !teamName.trim()) {
+      toast.error("Select a hackathon and enter a team name");
+      return;
+    }
+    setCreating(true);
+    try {
+      await api("/api/teams/create", {
+        method: "POST",
+        body: {
+          hackathonId,
+          name: teamName.trim(),
+          description: teamDesc.trim() || undefined,
+          skills: skillsInput.split(",").map((s) => s.trim()).filter(Boolean),
+          isLookingForMembers: looking,
+        },
+      });
+      toast.success("Team created!", "Share the invite code with teammates.");
+      setCreateOpen(false);
+      setTeamName("");
+      setTeamDesc("");
+      setSkillsInput("");
+    } catch (e) {
+      toast.error("Couldn't create team", e instanceof Error ? e.message : undefined);
+    } finally {
+      setCreating(false);
+    }
   }
+
+  async function handleSendInvite(e: React.FormEvent) {
+    e.preventDefault();
+    if (!inviteTeam || !inviteEmail.trim()) return;
+    setInviting(true);
+    try {
+      await api(`/api/teams/${inviteTeam.id}/invite`, { method: "POST", body: { email: inviteEmail.trim() } });
+      toast.success("Invitation emailed", `Sent to ${inviteEmail.trim()}`);
+      setInviteEmail("");
+      setInviteTeam(null);
+    } catch (e) {
+      toast.error("Couldn't invite", e instanceof Error ? e.message : undefined);
+    } finally {
+      setInviting(false);
+    }
+  }
+
+  async function handleLeave() {
+    if (!leavingTeam) return;
+    setLeaving(true);
+    try {
+      await api(`/api/teams/${leavingTeam.id}/leave`, { method: "POST", body: {} });
+      toast.success("Left team");
+      setLeavingTeam(null);
+    } catch (e) {
+      toast.error("Couldn't leave team", e instanceof Error ? e.message : undefined);
+    } finally {
+      setLeaving(false);
+    }
+  }
+
+  async function handleTransfer() {
+    if (!transferTeam || !newCaptainId) return;
+    setTransferring(true);
+    try {
+      await api(`/api/teams/${transferTeam.id}/transfer`, { method: "POST", body: { newCaptainId } });
+      toast.success("Captaincy transferred");
+      setTransferTeam(null);
+      setNewCaptainId("");
+    } catch (e) {
+      toast.error("Couldn't transfer captaincy", e instanceof Error ? e.message : undefined);
+    } finally {
+      setTransferring(false);
+    }
+  }
+
+  if (notConfigured) return <NotConfigured service="Firestore" />;
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-extrabold font-display">My Squads &amp; Teammate Radar</h1>
-        <p className="text-xs sm:text-sm text-text-secondary mt-1">
-          Coordinate with your squad members, share invite codes, or recruit high-match developers for active hackathons.
-        </p>
-      </div>
-
-      {/* Active Teams */}
-      <div className="space-y-6">
-        <h2 className="text-lg font-bold text-white flex items-center gap-2">
-          <Users className="w-5 h-5 text-violet-400" />
-          Active Squad
-        </h2>
-
-        {DEMO_MY_TEAMS.map((team) => (
-          <div
-            key={team.id}
-            className="card p-6 sm:p-8 rounded-3xl border border-white/10 bg-surface-1 shadow-xl space-y-6"
+    <div className="space-y-6 pb-8">
+      <PageHeader
+        title="Teams & Teammates"
+        description="Create a team, join with an 8-character invite code, manage captaincy, and jump into live team chat."
+        actions={
+          <Button
+            onClick={() => {
+              setHackathonId(eligibleRegs[0]?.hackathonId ?? "");
+              setCreateOpen(true);
+            }}
+            leftIcon={<Plus size={16} />}
           >
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-white/8">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="badge-violet text-[10px]">{team.hackathon}</span>
-                  <span className="badge-gray text-[10px]">{team.track}</span>
-                </div>
-                <h3 className="text-2xl font-black text-white">{team.name}</h3>
-              </div>
+            Create Team
+          </Button>
+        }
+      />
 
-              {/* Invite Code Box */}
-              <div className="flex items-center gap-3 p-3 rounded-2xl bg-white/5 border border-white/10">
-                <div>
-                  <span className="text-[10px] text-text-secondary uppercase block">Team Invite Code</span>
-                  <span className="font-mono font-bold text-sm text-aqua-400">{team.inviteCode}</span>
-                </div>
-                <button
-                  onClick={() => copyInvite(team.inviteCode)}
-                  className="btn-icon text-text-secondary hover:text-white"
-                  title="Copy Invite Code"
-                >
-                  {copiedCode === team.inviteCode ? (
-                    <Check className="w-4 h-4 text-green-400" />
-                  ) : (
-                    <Copy className="w-4 h-4" />
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {/* Member roster */}
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
-                  Roster ({team.members.length} / {team.maxMembers} Members)
-                </span>
-                {team.members.length < team.maxMembers && (
-                  <span className="text-xs font-semibold text-aqua-400">
-                    + {team.maxMembers - team.members.length} spot available
-                  </span>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {team.members.map((m, idx) => (
-                  <div
-                    key={idx}
-                    className="p-4 rounded-2xl bg-white/3 border border-white/8 hover:border-violet-500/20 transition-all space-y-3"
-                  >
-                    <div className="flex items-center gap-3">
-                      <img
-                        src={m.avatar}
-                        alt={m.name}
-                        className="w-10 h-10 rounded-xl object-cover border border-white/10"
-                      />
-                      <div>
-                        <h4 className="font-bold text-xs text-white">{m.name}</h4>
-                        <span className="text-[11px] text-violet-400">{m.role}</span>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-1.5 pt-1">
-                      {m.skills.map((s) => (
-                        <span key={s} className="text-[10px] px-2 py-0.5 rounded bg-white/5 border border-white/8 text-text-secondary">
-                          {s}
-                        </span>
-                      ))}
-                    </div>
-
-                    <div className="pt-2 border-t border-white/5 flex items-center justify-between text-[11px]">
-                      <a
-                        href={`https://github.com/${m.github}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center gap-1 text-text-secondary hover:text-white"
-                      >
-                        <Github className="w-3 h-3" /> @{m.github}
-                      </a>
-                    </div>
-                  </div>
-                ))}
-
-                {/* Empty spot card */}
-                {team.members.length < team.maxMembers && (
-                  <div className="p-6 rounded-2xl border-2 border-dashed border-white/10 flex flex-col items-center justify-center text-center text-text-secondary hover:border-white/20 transition-colors">
-                    <UserPlus className="w-6 h-6 text-text-secondary mb-2" />
-                    <span className="text-xs font-semibold text-white">Open Team Slot</span>
-                    <p className="text-[11px] text-text-secondary mt-1">
-                      Share your invite code or invite from the radar below.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        ))}
+      {/* Join by Code Bar */}
+      <div className="card p-4 sm:p-5 flex flex-col sm:flex-row sm:items-end gap-3">
+        <div className="flex-1">
+          <Input
+            label="Have a team invite code?"
+            placeholder="Enter invite code (e.g. X9K2M4PQ)"
+            leftAdornment={<KeyRound size={15} />}
+            value={joinCode}
+            onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+          />
+        </div>
+        <Button loading={joining} onClick={() => void handleJoinByCode(joinCode)} className="sm:mb-0.5">
+          Join Team
+        </Button>
       </div>
 
-      {/* Teammate Matchmaking Radar */}
-      <div className="card-glass p-6 sm:p-8 rounded-3xl border border-white/10 space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-aqua-400" />
-              Teammate Matchmaking Radar
-            </h2>
-            <p className="text-xs text-text-secondary mt-0.5">
-              Verified builders seeking teams for the India AI Challenge with complementary skill sets.
-            </p>
-          </div>
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        items={[
+          { id: "my", label: "My Teams", badge: (myTeams ?? []).length },
+          { id: "invites", label: "Invitations", badge: pendingInvites.length },
+        ]}
+      />
 
-          <div className="relative w-full sm:w-60">
-            <Search className="w-4 h-4 text-text-secondary absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Search skill (e.g. CUDA, UI)..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-xs text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-violet-500/50"
-            />
+      {tab === "my" ? (
+        teamsLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <CardSkeleton />
+            <CardSkeleton />
           </div>
-        </div>
+        ) : !myTeams || myTeams.length === 0 ? (
+          <EmptyState
+            icon={<Users size={22} />}
+            title="You aren't in any teams yet"
+            description="Register for a hackathon first, then form your own team or enter a teammate's invite code above."
+            action={
+              eligibleRegs.length > 0 ? (
+                <Button
+                  onClick={() => {
+                    setHackathonId(eligibleRegs[0].hackathonId);
+                    setCreateOpen(true);
+                  }}
+                >
+                  Create a Team
+                </Button>
+              ) : (
+                <Button href="/hackathons">Browse Hackathons</Button>
+              )
+            }
+          />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {myTeams.map((t) => {
+              const isCaptain = t.captainId === uid;
+              return (
+                <div key={t.id} className="card p-5 space-y-4 flex flex-col justify-between">
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-display font-bold text-lg text-slate-900">{t.name}</h3>
+                          <StatusBadge status={t.status} />
+                          {isCaptain && (
+                            <span className="badge-amber">
+                              <Crown size={11} /> Captain
+                            </span>
+                          )}
+                        </div>
+                        <Link href={`/hackathons/${t.hackathonSlug}`} className="text-xs font-semibold text-[#1565D8] hover:underline">
+                          {t.hackathonName || "Hackathon"}
+                        </Link>
+                      </div>
+                      <span className="badge-blue">{t.memberIds.length}/{t.maxSize} members</span>
+                    </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {AVAILABLE_BUILDERS.filter(
-            (b) =>
-              b.skills.some((s) => s.toLowerCase().includes(searchQuery.toLowerCase())) ||
-              b.name.toLowerCase().includes(searchQuery.toLowerCase())
-          ).map((builder) => (
-            <div
-              key={builder.id}
-              className="card p-5 rounded-2xl border border-white/8 hover:border-aqua-400/30 transition-all space-y-4"
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <img
-                    src={builder.avatar}
-                    alt={builder.name}
-                    className="w-11 h-11 rounded-xl object-cover border border-white/10"
-                  />
-                  <div>
-                    <h4 className="font-bold text-xs text-white">{builder.name}</h4>
-                    <p className="text-[11px] text-text-secondary">{builder.title}</p>
-                    <span className="text-[10px] text-text-secondary">{builder.college}</span>
+                    {t.description && <p className="text-xs sm:text-sm text-slate-600">{t.description}</p>}
+
+                    {(t.skills ?? []).length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {t.skills.map((s) => (
+                          <span key={s} className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px] font-medium">
+                            {s}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    <TeamSecretCode teamId={t.id} />
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100">
+                    <Button size="sm" href={`/dashboard/messages?teamId=${t.id}`} leftIcon={<MessageSquare size={14} />}>
+                      Team Chat
+                    </Button>
+                    <Button variant="secondary" size="sm" onClick={() => setInviteTeam(t)} leftIcon={<UserPlus size={14} />}>
+                      Invite
+                    </Button>
+                    {isCaptain && t.memberIds.length > 1 && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          setTransferTeam(t);
+                          setNewCaptainId(t.memberIds.find((m) => m !== uid) ?? "");
+                        }}
+                        leftIcon={<Crown size={14} />}
+                      >
+                        Transfer
+                      </Button>
+                    )}
+                    <Button variant="danger" size="sm" onClick={() => setLeavingTeam(t)} leftIcon={<LogOut size={14} />} className="ml-auto">
+                      Leave
+                    </Button>
                   </div>
                 </div>
-
-                <span className="badge-aqua text-[10px] font-bold">
-                  {builder.matchRate}% Match
-                </span>
+              );
+            })}
+          </div>
+        )
+      ) : pendingInvites.length === 0 ? (
+        <EmptyState icon={<Mail size={22} />} title="No pending invitations" description="When teammates invite your email address, invitations appear here live." />
+      ) : (
+        <div className="space-y-3">
+          {pendingInvites.map((inv) => (
+            <div key={inv.id} className="card p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <p className="font-display font-bold text-base text-slate-900">{inv.teamName}</p>
+                <p className="text-xs text-slate-500">Invite code: <span className="font-mono font-semibold">{inv.inviteCode}</span></p>
               </div>
-
-              <div className="flex flex-wrap gap-1.5">
-                {builder.skills.map((s) => (
-                  <span key={s} className="text-[10px] px-2 py-0.5 rounded bg-white/5 border border-white/8 text-text-secondary">
-                    {s}
-                  </span>
-                ))}
-              </div>
-
-              <button
-                onClick={() => inviteBuilder(builder.id)}
-                disabled={invitedBuilders.includes(builder.id)}
-                className={`w-full py-2 rounded-xl text-xs font-semibold transition-all ${
-                  invitedBuilders.includes(builder.id)
-                    ? "bg-green-500/15 text-green-400 border border-green-500/25 cursor-default"
-                    : "btn-primary justify-center"
-                }`}
-              >
-                {invitedBuilders.includes(builder.id) ? "✓ Invite Sent" : "Invite to Squad"}
-              </button>
+              <Button size="sm" loading={joining} onClick={() => void handleJoinByCode(inv.inviteCode || "")}>
+                Accept &amp; Join
+              </Button>
             </div>
           ))}
         </div>
-      </div>
+      )}
+
+      {/* Create Team Modal */}
+      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Create a Hackathon Team">
+        <form onSubmit={handleCreateTeam} className="space-y-4">
+          {eligibleRegs.length === 0 ? (
+            <EmptyState
+              title="No solo registrations available"
+              description="Register for a hackathon (or leave an existing team in that hackathon) before forming a new team."
+              action={<Button href="/hackathons">Explore Hackathons</Button>}
+            />
+          ) : (
+            <>
+              <div className="form-field">
+                <label className="label">Hackathon *</label>
+                <select className="input" value={hackathonId} onChange={(e) => setHackathonId(e.target.value)} required>
+                  {eligibleRegs.map((r) => (
+                    <option key={r.id} value={r.hackathonId}>
+                      {r.hackathonName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Input label="Team Name *" value={teamName} onChange={(e) => setTeamName(e.target.value)} placeholder="e.g. Pixel Forge" required />
+              <Textarea label="What are you building? (optional)" rows={3} value={teamDesc} onChange={(e) => setTeamDesc(e.target.value)} />
+              <Input
+                label="Needed Skills (comma separated)"
+                value={skillsInput}
+                onChange={(e) => setSkillsInput(e.target.value)}
+                placeholder="React, Python, UI/UX"
+              />
+              <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                <input type="checkbox" checked={looking} onChange={(e) => setLooking(e.target.checked)} className="rounded border-slate-300" />
+                Show team as open / looking for members
+              </label>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="secondary" type="button" onClick={() => setCreateOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" loading={creating}>
+                  Create Team
+                </Button>
+              </div>
+            </>
+          )}
+        </form>
+      </Modal>
+
+      {/* Invite Modal */}
+      <Modal open={!!inviteTeam} onClose={() => setInviteTeam(null)} title={`Invite teammate to ${inviteTeam?.name}`}>
+        <form onSubmit={handleSendInvite} className="space-y-4">
+          <Input
+            label="Teammate's Email *"
+            type="email"
+            required
+            placeholder="teammate@example.com"
+            value={inviteEmail}
+            onChange={(e) => setInviteEmail(e.target.value)}
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" type="button" onClick={() => setInviteTeam(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" loading={inviting}>
+              Send Invite
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Transfer Captain Modal */}
+      <Modal open={!!transferTeam} onClose={() => setTransferTeam(null)} title="Transfer Team Captaincy">
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">Select the teammate UID who should become team captain before you leave or step down.</p>
+          <select className="input" value={newCaptainId} onChange={(e) => setNewCaptainId(e.target.value)}>
+            {(transferTeam?.memberIds ?? [])
+              .filter((m) => m !== uid)
+              .map((m) => (
+                <option key={m} value={m}>
+                  Member {m}
+                </option>
+              ))}
+          </select>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setTransferTeam(null)}>
+              Cancel
+            </Button>
+            <Button loading={transferring} onClick={() => void handleTransfer()}>
+              Transfer Captaincy
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Leave Confirm */}
+      <ConfirmDialog
+        open={!!leavingTeam}
+        onClose={() => setLeavingTeam(null)}
+        onConfirm={handleLeave}
+        loading={leaving}
+        danger
+        title={`Leave ${leavingTeam?.name ?? "team"}?`}
+        message="If you are the captain with other members in the team, transfer captaincy first."
+        confirmLabel="Leave Team"
+      />
     </div>
+  );
+}
+
+export default function MyTeamsPage() {
+  return (
+    <Suspense fallback={<CardSkeleton />}>
+      <TeamsInner />
+    </Suspense>
   );
 }

@@ -1,367 +1,292 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { collection, orderBy, query, where } from "firebase/firestore";
+import { CheckCircle2, FileCode2, Send, Trophy, Undo2 } from "lucide-react";
+import { clientDb, firebaseReady } from "@/lib/firebase/client";
+import { COLLECTIONS } from "@/lib/firebase/collections";
+import { useAuth } from "@/components/providers/AuthProvider";
+import { useLiveQuery } from "@/lib/data/live";
+import { useHackathon } from "@/lib/data/hooks";
+import { api } from "@/lib/api-client";
+import { formatInZone, toDate } from "@/lib/domain/dates";
+import { isSubmissionOpenAt } from "@/lib/domain/status";
 import {
-  FileText, Plus, ExternalLink, Github, Video, Globe,
-  CheckCircle2, Clock, Trophy, Award, MessageSquare, AlertCircle,
-  Sparkles, Layers, ChevronRight
-} from "lucide-react";
+  Button,
+  CardSkeleton,
+  ConfirmDialog,
+  Countdown,
+  EmptyState,
+  NotConfigured,
+  PageHeader,
+  StatusBadge,
+  useToast,
+} from "@/components/ui";
+import type { Project, Registration, SubmissionWithMeta } from "@/types";
 
-interface Submission {
-  id: string;
-  title: string;
-  tagline: string;
-  hackathon: string;
-  track: string;
-  status: "submitted" | "shortlisted" | "won" | "draft";
-  score?: number;
-  maxScore?: number;
-  prize?: string;
-  submittedAt: string;
-  githubUrl: string;
-  demoUrl: string;
-  videoUrl: string;
-  techStack: string[];
-  judgeFeedback?: string;
-}
+function SubmissionsInner() {
+  const { firebaseUser, notConfigured } = useAuth();
+  const params = useSearchParams();
+  const toast = useToast();
+  const uid = firebaseUser?.uid;
+  const ready = Boolean(uid && firebaseReady());
 
-const DEMO_SUBMISSIONS: Submission[] = [
-  {
-    id: "sub-1",
-    title: "NeuroPulse — Real-Time Agentic ICU Monitoring",
-    tagline: "Multimodal AI agent reading vital telemetry and predicting septic shock 6 hours in advance.",
-    hackathon: "India AI Innovation Challenge 2026",
-    track: "Healthcare & AI for Good",
-    status: "shortlisted",
-    score: 94,
-    maxScore: 100,
-    submittedAt: "Oct 16, 2026",
-    githubUrl: "https://github.com/hacksyra/neuropulse-icu",
-    demoUrl: "https://neuropulse-icu.vercel.app",
-    videoUrl: "https://youtube.com/watch?v=demo123",
-    techStack: ["Next.js 15", "PyTorch", "FastAPI", "WebSockets", "Tailwind CSS"],
-    judgeFeedback: "Exceptional clinical reasoning architecture and clean UI. Real-world latency benchmark was very impressive.",
-  },
-  {
-    id: "sub-2",
-    title: "AetherShield — Zero-Knowledge Identity Bridge",
-    tagline: "Self-sovereign credential verification protocol without revealing PII on Polygon zkEVM.",
-    hackathon: "Autonomous Web3 & Zero-Knowledge Sprint",
-    track: "Privacy & Scalability",
-    status: "won",
-    prize: "1st Place Grand Winner (₹3,00,000)",
-    score: 98,
-    maxScore: 100,
-    submittedAt: "Sep 28, 2026",
-    githubUrl: "https://github.com/hacksyra/aethershield-zk",
-    demoUrl: "https://aethershield.xyz",
-    videoUrl: "https://loom.com/share/demo456",
-    techStack: ["Circom", "Solidity", "Rust", "Ethers.js", "TypeScript"],
-    judgeFeedback: "Flawless cryptographic circuits and high-caliber documentation. Production-grade execution.",
-  },
-];
+  const [selectedHackId, setSelectedHackId] = useState(params.get("hackathonId") ?? "");
+  const [selectedProjectId, setSelectedProjectId] = useState(params.get("projectId") ?? "");
+  const [trackIds, setTrackIds] = useState<string[]>([]);
+  const [submitting, setSubmitting] = useState(false);
 
-export default function SubmissionsPage() {
-  const [showSubmitModal, setShowSubmitModal] = useState<boolean>(false);
-  const [submissions, setSubmissions] = useState<Submission[]>(DEMO_SUBMISSIONS);
+  const [withdrawTarget, setWithdrawTarget] = useState<SubmissionWithMeta | null>(null);
+  const [withdrawing, setWithdrawing] = useState(false);
 
-  // Form states
-  const [newTitle, setNewTitle] = useState<string>("");
-  const [newTagline, setNewTagline] = useState<string>("");
-  const [newTrack, setNewTrack] = useState<string>("Generative AI & LLMs");
-  const [newGithub, setNewGithub] = useState<string>("");
-  const [newDemo, setNewDemo] = useState<string>("");
-  const [newVideo, setNewVideo] = useState<string>("");
-  const [newStack, setNewStack] = useState<string>("");
-  const [newDesc, setNewDesc] = useState<string>("");
+  const { data: regs } = useLiveQuery<Registration>(
+    ["sub-regs", uid ?? null],
+    ready ? () => query(collection(clientDb(), COLLECTIONS.REGISTRATIONS), where("userId", "==", uid), orderBy("createdAt", "desc")) : null
+  );
 
-  function handleCreateSubmission(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newTitle) return;
+  const { data: projects } = useLiveQuery<Project>(
+    ["sub-projects", uid ?? null],
+    ready ? () => query(collection(clientDb(), COLLECTIONS.PROJECTS), where("memberIds", "array-contains", uid), orderBy("updatedAt", "desc")) : null
+  );
 
-    const newSub: Submission = {
-      id: `sub-${Date.now()}`,
-      title: newTitle,
-      tagline: newTagline || "Innovative hackathon solution built on HACKSYRA.",
-      hackathon: "India AI Innovation Challenge 2026",
-      track: newTrack,
-      status: "submitted",
-      submittedAt: "Just now",
-      githubUrl: newGithub || "https://github.com",
-      demoUrl: newDemo || "https://demo.vercel.app",
-      videoUrl: newVideo || "https://youtube.com",
-      techStack: newStack ? newStack.split(",").map((s) => s.trim()) : ["React", "TypeScript", "Node.js"],
-    };
+  const { data: submissions, isLoading } = useLiveQuery<SubmissionWithMeta>(
+    ["my-submissions", uid ?? null],
+    ready ? () => query(collection(clientDb(), COLLECTIONS.SUBMISSIONS), where("memberIds", "array-contains", uid), orderBy("updatedAt", "desc")) : null
+  );
 
-    setSubmissions([newSub, ...submissions]);
-    setShowSubmitModal(false);
-    setNewTitle("");
-    setNewTagline("");
-    setNewGithub("");
-    setNewDemo("");
-    setNewVideo("");
-    setNewStack("");
-    setNewDesc("");
+  const confirmedRegs = (regs ?? []).filter((r) => ["confirmed", "checked_in"].includes(r.status));
+  const { data: chosenHackathon } = useHackathon(selectedHackId || null);
+
+  useEffect(() => {
+    if (!selectedHackId && confirmedRegs.length > 0) setSelectedHackId(confirmedRegs[0].hackathonId);
+  }, [confirmedRegs, selectedHackId]);
+
+  useEffect(() => {
+    if (!selectedProjectId && projects && projects.length > 0) setSelectedProjectId(projects[0].id);
+  }, [projects, selectedProjectId]);
+
+  useEffect(() => {
+    const tracks = chosenHackathon?.tracks ?? [];
+    if (tracks.length > 0) {
+      setTrackIds((prev) => (prev.length > 0 ? prev : [tracks[0].id]));
+    } else if (chosenHackathon) {
+      setTrackIds(["general"]);
+    }
+  }, [chosenHackathon]);
+
+  function toggleTrack(tid: string) {
+    if (!chosenHackathon?.allowMultipleTracks) {
+      setTrackIds([tid]);
+      return;
+    }
+    setTrackIds((prev) => (prev.includes(tid) ? (prev.length > 1 ? prev.filter((x) => x !== tid) : prev) : [...prev, tid]));
   }
 
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedHackId || !selectedProjectId) {
+      toast.error("Choose a hackathon and a project");
+      return;
+    }
+    const chosenTracks = trackIds.length > 0 ? trackIds : ["general"];
+    setSubmitting(true);
+    try {
+      await api("/api/submissions/submit", {
+        method: "POST",
+        body: { hackathonId: selectedHackId, projectId: selectedProjectId, trackIds: chosenTracks },
+      });
+      toast.success("Project submitted!", "An immutable submission snapshot has been recorded.");
+    } catch (err) {
+      toast.error("Submission failed", err instanceof Error ? err.message : undefined);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function confirmWithdraw() {
+    if (!withdrawTarget) return;
+    setWithdrawing(true);
+    try {
+      await api(`/api/submissions/${withdrawTarget.id}/withdraw`, { method: "POST", body: {} });
+      toast.success("Submission withdrawn");
+      setWithdrawTarget(null);
+    } catch (err) {
+      toast.error("Couldn't withdraw", err instanceof Error ? err.message : undefined);
+    } finally {
+      setWithdrawing(false);
+    }
+  }
+
+  if (notConfigured) return <NotConfigured service="Firestore" />;
+
+  const deadlineOpen = chosenHackathon ? isSubmissionOpenAt(chosenHackathon) : true;
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold font-display">My Project Submissions</h1>
-          <p className="text-xs sm:text-sm text-text-secondary mt-1">
-            Submit your hackathon deliverables, track real-time judging evaluations, and view peer feedback.
-          </p>
+    <div className="space-y-6 pb-8">
+      <PageHeader
+        title="Project Submissions"
+        description="Submit your project to a registered hackathon with track selection, immutable snapshots, and live judging results."
+        actions={
+          <Button variant="secondary" href="/dashboard/projects">
+            Manage Projects
+          </Button>
+        }
+      />
+
+      {/* Submit Form */}
+      <form onSubmit={handleSubmit} className="card p-5 sm:p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <h2 className="font-display font-bold text-lg text-slate-900">Submit / Update Entry</h2>
+          {chosenHackathon?.submissionCloseDate && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-slate-500">Deadline:</span>
+              <Countdown target={chosenHackathon.submissionCloseDate} />
+            </div>
+          )}
         </div>
 
-        <button
-          onClick={() => setShowSubmitModal(true)}
-          className="btn-primary inline-flex items-center gap-2 self-start sm:self-auto text-xs"
-        >
-          <Plus className="w-4 h-4" /> Submit New Project
-        </button>
-      </div>
-
-      {/* Submissions List */}
-      <div className="space-y-6">
-        {submissions.map((sub) => (
-          <div
-            key={sub.id}
-            className="card p-6 rounded-3xl border border-white/10 hover:border-violet-500/30 transition-all duration-300 relative overflow-hidden"
-          >
-            {/* Top row */}
-            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 pb-4 border-b border-white/8">
-              <div>
-                <div className="flex flex-wrap items-center gap-2 mb-2">
-                  <span className="badge-gray text-[10px] font-semibold">{sub.hackathon}</span>
-                  <span className="badge-violet text-[10px]">{sub.track}</span>
-                  <span
-                    className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider ${
-                      sub.status === "won"
-                        ? "bg-amber/20 text-amber border border-amber/30"
-                        : sub.status === "shortlisted"
-                        ? "bg-aqua-400/15 text-aqua-400 border border-aqua-400/25"
-                        : "bg-white/10 text-text-secondary"
-                    }`}
-                  >
-                    {sub.status === "won" ? "🏆 " + sub.prize : "● " + sub.status}
-                  </span>
-                </div>
-
-                <h3 className="text-xl font-extrabold text-white">{sub.title}</h3>
-                <p className="text-xs text-text-secondary mt-1 max-w-3xl leading-relaxed">
-                  {sub.tagline}
-                </p>
+        {confirmedRegs.length === 0 ? (
+          <EmptyState
+            title="No confirmed hackathon registrations"
+            description="Register for an active hackathon before submitting a project."
+            action={<Button href="/hackathons">Explore Hackathons</Button>}
+          />
+        ) : !projects || projects.length === 0 ? (
+          <EmptyState
+            title="Create a project first"
+            description="Build your project story and attach your repo/demo URL before submitting."
+            action={<Button href="/dashboard/projects">Create Project</Button>}
+          />
+        ) : (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="form-field">
+                <label className="label">Registered Hackathon *</label>
+                <select className="input" value={selectedHackId} onChange={(e) => { setSelectedHackId(e.target.value); setTrackIds([]); }}>
+                  {confirmedRegs.map((r) => (
+                    <option key={r.id} value={r.hackathonId}>
+                      {r.hackathonName}
+                    </option>
+                  ))}
+                </select>
               </div>
-
-              {sub.score && (
-                <div className="flex items-center gap-3 p-3 rounded-2xl bg-white/5 border border-white/8 shrink-0">
-                  <div className="text-right">
-                    <span className="text-[10px] text-text-secondary uppercase">Judge Score</span>
-                    <div className="font-mono font-black text-xl text-aqua-400">
-                      {sub.score} <span className="text-xs text-text-secondary">/{sub.maxScore}</span>
-                    </div>
-                  </div>
-                  <Award className="w-6 h-6 text-amber" />
-                </div>
-              )}
-            </div>
-
-            {/* Links and tech stack */}
-            <div className="pt-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex flex-wrap gap-2">
-                {sub.techStack.map((tech) => (
-                  <span key={tech} className="skill-tag text-[11px]">
-                    {tech}
-                  </span>
-                ))}
-              </div>
-
-              <div className="flex items-center gap-3">
-                {sub.githubUrl && (
-                  <a
-                    href={sub.githubUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-xs text-text-secondary hover:text-white border border-white/8 transition-colors"
-                  >
-                    <Github className="w-3.5 h-3.5" /> Code Repo
-                  </a>
-                )}
-                {sub.demoUrl && (
-                  <a
-                    href={sub.demoUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-xs text-text-secondary hover:text-white border border-white/8 transition-colors"
-                  >
-                    <Globe className="w-3.5 h-3.5" /> Live Demo
-                  </a>
-                )}
-                {sub.videoUrl && (
-                  <a
-                    href={sub.videoUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-xs text-text-secondary hover:text-white border border-white/8 transition-colors"
-                  >
-                    <Video className="w-3.5 h-3.5" /> Pitch Video
-                  </a>
-                )}
+              <div className="form-field">
+                <label className="label">Project *</label>
+                <select className="input" value={selectedProjectId} onChange={(e) => setSelectedProjectId(e.target.value)}>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.title || "Untitled"} ({p.status})
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
-            {/* Judge Feedback box if available */}
-            {sub.judgeFeedback && (
-              <div className="mt-4 p-4 rounded-2xl bg-surface-2 border border-violet-500/20 flex items-start gap-3">
-                <MessageSquare className="w-4 h-4 text-violet-400 mt-0.5 shrink-0" />
-                <div>
-                  <span className="text-[11px] font-bold text-violet-300 block mb-0.5">Evaluation Feedback from Judges</span>
-                  <p className="text-xs text-text-secondary italic leading-relaxed">
-                    &ldquo;{sub.judgeFeedback}&rdquo;
-                  </p>
+            {chosenHackathon && (chosenHackathon.tracks ?? []).length > 0 && (
+              <div className="space-y-2">
+                <label className="label">
+                  Select Track{chosenHackathon.allowMultipleTracks ? "s" : ""} *
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {(chosenHackathon.tracks ?? []).map((tr) => {
+                    const active = trackIds.includes(tr.id);
+                    return (
+                      <button
+                        key={tr.id}
+                        type="button"
+                        onClick={() => toggleTrack(tr.id)}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-semibold border transition-colors min-h-[40px] ${
+                          active ? "bg-[#1565D8] text-white border-[#1565D8]" : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
+                        }`}
+                      >
+                        {tr.name}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
+
+            {!deadlineOpen && (
+              <p className="text-xs font-semibold text-red-600 bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5">
+                The submission window for this hackathon is currently closed.
+              </p>
+            )}
+
+            <div className="flex justify-end">
+              <Button type="submit" loading={submitting} disabled={!deadlineOpen} leftIcon={<Send size={15} />}>
+                Submit Entry
+              </Button>
+            </div>
+          </>
+        )}
+      </form>
+
+      {/* Submitted Entries */}
+      <div className="space-y-3">
+        <h2 className="font-display font-bold text-lg text-slate-900">Your Submissions</h2>
+        {isLoading ? (
+          <CardSkeleton />
+        ) : !submissions || submissions.length === 0 ? (
+          <EmptyState icon={<FileCode2 size={22} />} title="No submissions yet" description="Once you submit a project above, your locked snapshots and scores appear here." />
+        ) : (
+          <div className="space-y-3">
+            {submissions.map((s) => (
+              <div key={s.id} className="card p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1.5 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-display font-bold text-base text-slate-900">{s.projectTitle}</h3>
+                    <StatusBadge status={s.status} />
+                    {s.status === "winner" && (
+                      <span className="badge-amber">
+                        <Trophy size={12} /> {s.rank ? `Rank #${s.rank}` : "Winner"}
+                      </span>
+                    )}
+                    {typeof s.finalScore === "number" && (
+                      <span className="badge-blue">
+                        <CheckCircle2 size={12} /> Score: {s.finalScore.toFixed(1)}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    <Link href={`/hackathons/${s.hackathonSlug || s.hackathonId}`} className="font-semibold text-[#1565D8] hover:underline">
+                      {s.hackathonName || s.hackathonId}
+                    </Link>{" "}
+                    · {s.teamName ? `Team ${s.teamName}` : "Solo entry"} · Submitted {formatInZone(toDate(s.submittedAt ?? s.updatedAt))}
+                  </p>
+                </div>
+
+                {s.status !== "withdrawn" && (
+                  <Button variant="secondary" size="sm" onClick={() => setWithdrawTarget(s)} leftIcon={<Undo2 size={14} />}>
+                    Withdraw
+                  </Button>
+                )}
+              </div>
+            ))}
           </div>
-        ))}
+        )}
       </div>
 
-      {/* Submission Modal */}
-      {showSubmitModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-          <div className="card-glass max-w-2xl w-full p-6 sm:p-8 rounded-3xl border border-white/20 bg-surface-1 my-8 space-y-5">
-            <div className="flex items-center justify-between pb-4 border-b border-white/8">
-              <div>
-                <h3 className="text-lg font-bold font-display">Submit Hackathon Deliverable</h3>
-                <p className="text-xs text-text-secondary">India AI Innovation Challenge 2026</p>
-              </div>
-              <button
-                onClick={() => setShowSubmitModal(false)}
-                className="text-text-secondary hover:text-white p-2"
-              >
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateSubmission} className="space-y-4">
-              <div className="form-field">
-                <label className="label">Project Title</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. VisionAudit AI"
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  className="input"
-                />
-              </div>
-
-              <div className="form-field">
-                <label className="label">Elevator Pitch / Tagline (1 sentence)</label>
-                <input
-                  type="text"
-                  placeholder="What does it do and why does it matter?"
-                  value={newTagline}
-                  onChange={(e) => setNewTagline(e.target.value)}
-                  className="input"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="form-field">
-                  <label className="label">Track</label>
-                  <select
-                    value={newTrack}
-                    onChange={(e) => setNewTrack(e.target.value)}
-                    className="input cursor-pointer"
-                  >
-                    <option value="Generative AI & LLMs" className="bg-surface-1">Generative AI &amp; LLMs</option>
-                    <option value="Computer Vision" className="bg-surface-1">Computer Vision</option>
-                    <option value="NLP & Translation" className="bg-surface-1">NLP &amp; Translation</option>
-                    <option value="AI for Good" className="bg-surface-1">AI for Good</option>
-                  </select>
-                </div>
-
-                <div className="form-field">
-                  <label className="label">Tech Stack (comma separated)</label>
-                  <input
-                    type="text"
-                    placeholder="Next.js, PyTorch, FastAPI"
-                    value={newStack}
-                    onChange={(e) => setNewStack(e.target.value)}
-                    className="input"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="form-field">
-                  <label className="label">GitHub Repo</label>
-                  <input
-                    type="url"
-                    placeholder="https://github.com/..."
-                    value={newGithub}
-                    onChange={(e) => setNewGithub(e.target.value)}
-                    className="input text-xs"
-                  />
-                </div>
-
-                <div className="form-field">
-                  <label className="label">Live Demo URL</label>
-                  <input
-                    type="url"
-                    placeholder="https://myproject.vercel.app"
-                    value={newDemo}
-                    onChange={(e) => setNewDemo(e.target.value)}
-                    className="input text-xs"
-                  />
-                </div>
-
-                <div className="form-field">
-                  <label className="label">Pitch Video Link</label>
-                  <input
-                    type="url"
-                    placeholder="YouTube or Loom URL"
-                    value={newVideo}
-                    onChange={(e) => setNewVideo(e.target.value)}
-                    className="input text-xs"
-                  />
-                </div>
-              </div>
-
-              <div className="form-field">
-                <label className="label">Detailed Problem &amp; Architecture</label>
-                <textarea
-                  rows={3}
-                  placeholder="Describe technical challenges solved, API integrations, and potential impact..."
-                  value={newDesc}
-                  onChange={(e) => setNewDesc(e.target.value)}
-                  className="input text-xs"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-white/8">
-                <button
-                  type="button"
-                  onClick={() => setShowSubmitModal(false)}
-                  className="btn-secondary text-xs"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="btn-primary text-xs"
-                >
-                  Confirm Final Submission
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={!!withdrawTarget}
+        onClose={() => setWithdrawTarget(null)}
+        onConfirm={confirmWithdraw}
+        loading={withdrawing}
+        danger
+        title={`Withdraw "${withdrawTarget?.projectTitle}"?`}
+        message="You can re-submit before the deadline closes, as long as submissions remain open."
+        confirmLabel="Withdraw Submission"
+      />
     </div>
+  );
+}
+
+export default function SubmissionsPage() {
+  return (
+    <Suspense fallback={<CardSkeleton />}>
+      <SubmissionsInner />
+    </Suspense>
   );
 }

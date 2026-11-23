@@ -1,326 +1,397 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
-import Link from "next/link";
+import { collection, deleteDoc, doc, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
+import { nanoid } from "nanoid";
+import { Code2, Edit3, ExternalLink, Github, Plus, Send, Trash2, Upload, Video } from "lucide-react";
+import { clientDb, firebaseReady } from "@/lib/firebase/client";
+import { COLLECTIONS } from "@/lib/firebase/collections";
+import { useAuth } from "@/components/providers/AuthProvider";
+import { useLiveQuery } from "@/lib/data/live";
+import { uploadToStorage } from "@/lib/storage/upload";
+import { slugify } from "@/lib/domain/slug";
+import { MarkdownEditor } from "@/components/common/MarkdownEditor";
 import {
-  Code, Plus, ExternalLink, Github, Globe, Star,
-  Eye, ThumbsUp, Sparkles, Trophy, Layers, CheckCircle2
-} from "lucide-react";
+  Button,
+  CardSkeleton,
+  ConfirmDialog,
+  EmptyState,
+  Input,
+  Modal,
+  NotConfigured,
+  PageHeader,
+  StatusBadge,
+  Textarea,
+  useToast,
+} from "@/components/ui";
+import type { Project } from "@/types";
 
-interface PortfolioProject {
+type ProjectFormState = {
   id: string;
   title: string;
   tagline: string;
+  description: string;
+  inspiration: string;
+  howItWorks: string;
+  challenges: string;
+  achievements: string;
+  lessonsLearned: string;
+  futurePlans: string;
+  technologies: string;
+  repositoryUrl: string;
+  liveUrl: string;
+  demoVideoUrl: string;
   coverImage: string;
-  hackathonWon?: string;
-  likes: number;
-  stars: number;
-  views: number;
-  githubUrl: string;
-  demoUrl: string;
-  tags: string[];
   isPublic: boolean;
+  status: "draft" | "published";
+  isNew: boolean;
+};
+
+const EMPTY_FORM = (): ProjectFormState => ({
+  id: `proj_${nanoid(10)}`,
+  title: "",
+  tagline: "",
+  description: "",
+  inspiration: "",
+  howItWorks: "",
+  challenges: "",
+  achievements: "",
+  lessonsLearned: "",
+  futurePlans: "",
+  technologies: "",
+  repositoryUrl: "",
+  liveUrl: "",
+  demoVideoUrl: "",
+  coverImage: "",
+  isPublic: true,
+  status: "draft",
+  isNew: true,
+});
+
+function fromProject(p: Project): ProjectFormState {
+  return {
+    id: p.id,
+    title: p.title ?? "",
+    tagline: p.tagline ?? "",
+    description: p.description ?? "",
+    inspiration: p.inspiration ?? "",
+    howItWorks: p.howItWorks ?? "",
+    challenges: p.challenges ?? "",
+    achievements: p.achievements ?? "",
+    lessonsLearned: p.lessonsLearned ?? "",
+    futurePlans: p.futurePlans ?? "",
+    technologies: (p.technologies ?? []).join(", "),
+    repositoryUrl: p.repositoryUrl ?? "",
+    liveUrl: p.liveUrl ?? "",
+    demoVideoUrl: p.demoVideoUrl ?? "",
+    coverImage: p.coverImage ?? "",
+    isPublic: Boolean(p.isPublic),
+    status: p.status === "published" ? "published" : "draft",
+    isNew: false,
+  };
 }
 
-const DEMO_PROJECTS: PortfolioProject[] = [
-  {
-    id: "proj-1",
-    title: "NeuroPulse — Agentic ICU Monitoring",
-    tagline: "Multimodal AI agent reading vital telemetry and predicting septic shock 6 hours in advance.",
-    coverImage: "https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?w=600&auto=format&fit=crop&q=80",
-    hackathonWon: "Shortlisted for Finals • India AI Challenge",
-    likes: 142,
-    stars: 89,
-    views: 1240,
-    githubUrl: "https://github.com/hacksyra/neuropulse-icu",
-    demoUrl: "https://neuropulse-icu.vercel.app",
-    tags: ["Next.js", "PyTorch", "FastAPI", "WebSockets"],
-    isPublic: true,
-  },
-  {
-    id: "proj-2",
-    title: "AetherShield — Zero-Knowledge Bridge",
-    tagline: "Self-sovereign credential verification protocol without revealing PII on Polygon zkEVM.",
-    coverImage: "https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=600&auto=format&fit=crop&q=80",
-    hackathonWon: "1st Place Winner • Autonomous Web3 Sprint",
-    likes: 310,
-    stars: 215,
-    views: 3480,
-    githubUrl: "https://github.com/hacksyra/aethershield-zk",
-    demoUrl: "https://aethershield.xyz",
-    tags: ["Circom", "Solidity", "Rust", "Ethers.js"],
-    isPublic: true,
-  },
-  {
-    id: "proj-3",
-    title: "EcoGrid Dynamic Load Balancer",
-    tagline: "Smart micro-grid battery dispatching using reinforcement learning for urban solar farms.",
-    coverImage: "https://images.unsplash.com/photo-1473341304170-971dccb5ac1e?w=600&auto=format&fit=crop&q=80",
-    hackathonWon: "Top 5 National Finalist • CleanTech 2026",
-    likes: 98,
-    stars: 45,
-    views: 980,
-    githubUrl: "https://github.com/hacksyra/ecogrid-optimizer",
-    demoUrl: "https://ecogrid.dev",
-    tags: ["Python", "RL", "FastAPI", "React", "Mapbox"],
-    isPublic: true,
-  },
-];
+export default function MyProjectsPage() {
+  const { firebaseUser, notConfigured } = useAuth();
+  const toast = useToast();
+  const uid = firebaseUser?.uid;
+  const ready = Boolean(uid && firebaseReady());
 
-export default function ProjectsPortfolioPage() {
-  const [projects, setProjects] = useState<PortfolioProject[]>(DEMO_PROJECTS);
-  const [showAddModal, setShowAddModal] = useState<boolean>(false);
+  const [form, setForm] = useState<ProjectFormState | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState<Project | null>(null);
+  const [delBusy, setDelBusy] = useState(false);
 
-  // Form states
-  const [title, setTitle] = useState<string>("");
-  const [tagline, setTagline] = useState<string>("");
-  const [githubUrl, setGithubUrl] = useState<string>("");
-  const [demoUrl, setDemoUrl] = useState<string>("");
-  const [tags, setTags] = useState<string>("");
+  const { data: projects, isLoading } = useLiveQuery<Project>(
+    ["my-projects", uid ?? null],
+    ready ? () => query(collection(clientDb(), COLLECTIONS.PROJECTS), where("memberIds", "array-contains", uid), orderBy("updatedAt", "desc")) : null
+  );
 
-  function handleAddProject(e: React.FormEvent) {
+  async function saveProject(e: React.FormEvent) {
     e.preventDefault();
-    if (!title) return;
+    if (!form || !uid || !firebaseReady()) return;
+    if (!form.title.trim() || !form.description.trim()) {
+      toast.error("Title and description are required");
+      return;
+    }
+    setSaving(true);
+    try {
+      const techs = form.technologies
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+      const baseFields = {
+        title: form.title.trim(),
+        slug: `${slugify(form.title) || "project"}-${form.id.slice(-4).toLowerCase()}`,
+        tagline: form.tagline.trim(),
+        description: form.description.trim(),
+        inspiration: form.inspiration.trim(),
+        howItWorks: form.howItWorks.trim(),
+        challenges: form.challenges.trim(),
+        achievements: form.achievements.trim(),
+        lessonsLearned: form.lessonsLearned.trim(),
+        futurePlans: form.futurePlans.trim(),
+        technologies: techs,
+        repositoryUrl: form.repositoryUrl.trim(),
+        liveUrl: form.liveUrl.trim(),
+        demoVideoUrl: form.demoVideoUrl.trim(),
+        coverImage: form.coverImage.trim(),
+        isPublic: form.isPublic,
+        status: form.status,
+        updatedAt: serverTimestamp(),
+      };
 
-    const newProject: PortfolioProject = {
-      id: `proj-${Date.now()}`,
-      title,
-      tagline: tagline || "Innovative engineering solution built on HACKSYRA.",
-      coverImage: "https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=600&auto=format&fit=crop&q=80",
-      likes: 1,
-      stars: 1,
-      views: 12,
-      githubUrl: githubUrl || "https://github.com",
-      demoUrl: demoUrl || "https://demo.vercel.app",
-      tags: tags ? tags.split(",").map((t) => t.trim()) : ["React", "TypeScript"],
-      isPublic: true,
-    };
-
-    setProjects([newProject, ...projects]);
-    setShowAddModal(false);
-    setTitle("");
-    setTagline("");
-    setGithubUrl("");
-    setDemoUrl("");
-    setTags("");
+      const ref = doc(clientDb(), COLLECTIONS.PROJECTS, form.id);
+      if (form.isNew) {
+        await setDoc(ref, {
+          id: form.id,
+          ...baseFields,
+          ownerId: uid,
+          memberIds: [uid],
+          likesCount: 0,
+          viewsCount: 0,
+          bookmarksCount: 0,
+          linkedHackathons: [],
+          createdAt: serverTimestamp(),
+        });
+      } else {
+        await updateDoc(ref, baseFields);
+      }
+      toast.success(form.isNew ? "Project created!" : "Project saved!");
+      setForm(null);
+    } catch (err) {
+      toast.error("Couldn't save project", err instanceof Error ? err.message : undefined);
+    } finally {
+      setSaving(false);
+    }
   }
 
+  async function handleCoverUpload(file: File) {
+    if (!form || !uid) return;
+    setUploading(1);
+    try {
+      // If project doc doesn't exist yet, store under users/{uid}/project-covers/ so Storage rules succeed cleanly
+      const storagePath = form.isNew
+        ? `users/${uid}/project-covers/${form.id}`
+        : `projects/${form.id}/cover-${Date.now()}`;
+      const res = await uploadToStorage(storagePath, file, {
+        maxMb: 5,
+        accept: ["image/"],
+        onProgress: (p) => setUploading(p),
+      });
+      setForm({ ...form, coverImage: res.url });
+      toast.success("Cover image uploaded");
+    } catch (err) {
+      toast.error("Upload failed", err instanceof Error ? err.message : undefined);
+    } finally {
+      setUploading(null);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleting) return;
+    setDelBusy(true);
+    try {
+      await deleteDoc(doc(clientDb(), COLLECTIONS.PROJECTS, deleting.id));
+      toast.success("Project deleted");
+      setDeleting(null);
+    } catch (err) {
+      toast.error("Couldn't delete project", err instanceof Error ? err.message : undefined);
+    } finally {
+      setDelBusy(false);
+    }
+  }
+
+  if (notConfigured) return <NotConfigured service="Firestore" />;
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold font-display">Builder Portfolio</h1>
-          <p className="text-xs sm:text-sm text-text-secondary mt-1">
-            Showcase your hackathon solutions and shipped products to recruiters and founders.
-          </p>
+    <div className="space-y-6 pb-8">
+      <PageHeader
+        title="My Projects"
+        description="Build your project story, upload demos, and submit directly to hackathons."
+        actions={
+          <Button onClick={() => setForm(EMPTY_FORM())} leftIcon={<Plus size={16} />}>
+            New Project
+          </Button>
+        }
+      />
+
+      {isLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          <CardSkeleton />
+          <CardSkeleton />
+          <CardSkeleton />
         </div>
-
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="btn-primary inline-flex items-center gap-2 self-start sm:self-auto text-xs"
-        >
-          <Plus className="w-4 h-4" /> Add Project to Portfolio
-        </button>
-      </div>
-
-      {/* Aggregate Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="card p-4 rounded-2xl border border-white/8 bg-surface-1">
-          <span className="text-[10px] text-text-secondary uppercase">Shipped Projects</span>
-          <p className="text-2xl font-black text-white mt-1">{projects.length}</p>
-        </div>
-
-        <div className="card p-4 rounded-2xl border border-white/8 bg-surface-1">
-          <span className="text-[10px] text-text-secondary uppercase">Podium Finishes</span>
-          <p className="text-2xl font-black text-amber mt-1">2 Wins</p>
-        </div>
-
-        <div className="card p-4 rounded-2xl border border-white/8 bg-surface-1">
-          <span className="text-[10px] text-text-secondary uppercase">Community Upvotes</span>
-          <p className="text-2xl font-black text-aqua-400 mt-1">
-            {projects.reduce((acc, p) => acc + p.likes, 0)}
-          </p>
-        </div>
-
-        <div className="card p-4 rounded-2xl border border-white/8 bg-surface-1">
-          <span className="text-[10px] text-text-secondary uppercase">Portfolio Views</span>
-          <p className="text-2xl font-black text-signal-blue mt-1">
-            {projects.reduce((acc, p) => acc + p.views, 0).toLocaleString()}
-          </p>
-        </div>
-      </div>
-
-      {/* Projects Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {projects.map((proj) => (
-          <div
-            key={proj.id}
-            className="card rounded-3xl border border-white/10 hover:border-violet-500/40 transition-all duration-300 overflow-hidden flex flex-col justify-between group bg-surface-1"
-          >
-            <div>
-              {/* Cover Image */}
-              <div className="h-44 relative overflow-hidden bg-surface-2">
-                <img
-                  src={proj.coverImage}
-                  alt={proj.title}
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                />
-                {proj.hackathonWon && (
-                  <div className="absolute top-3 left-3 bg-amber/90 text-midnight text-[10px] font-bold px-2.5 py-1 rounded-full shadow-lg flex items-center gap-1">
-                    <Trophy className="w-3 h-3" />
-                    <span className="line-clamp-1">{proj.hackathonWon}</span>
+      ) : !projects || projects.length === 0 ? (
+        <EmptyState
+          icon={<Code2 size={22} />}
+          title="No projects built yet"
+          description="Create your first project showcase with live demos, GitHub links, and architecture notes."
+          action={<Button onClick={() => setForm(EMPTY_FORM())}>Create Your First Project</Button>}
+        />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {projects.map((p) => (
+            <div key={p.id} className="card overflow-hidden flex flex-col justify-between">
+              <div>
+                {p.coverImage && (
+                  <div className="relative h-36 w-full bg-slate-100">
+                    <Image src={p.coverImage} alt={p.title} fill className="object-cover" />
                   </div>
                 )}
-              </div>
-
-              {/* Body */}
-              <div className="p-5 space-y-3">
-                <h3 className="font-bold text-base text-white group-hover:text-violet-400 transition-colors line-clamp-1">
-                  {proj.title}
-                </h3>
-                <p className="text-xs text-text-secondary line-clamp-2 leading-relaxed">
-                  {proj.tagline}
-                </p>
-
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {proj.tags.map((t) => (
-                    <span key={t} className="text-[10px] px-2 py-0.5 rounded-md bg-white/5 border border-white/8 text-text-secondary">
-                      {t}
-                    </span>
-                  ))}
+                <div className="p-5 space-y-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="font-display font-bold text-lg text-slate-900 line-clamp-1">{p.title}</h3>
+                    <StatusBadge status={p.status} />
+                  </div>
+                  {p.tagline && <p className="text-xs sm:text-sm text-slate-600 line-clamp-2">{p.tagline}</p>}
+                  {(p.technologies ?? []).length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {p.technologies.slice(0, 4).map((t) => (
+                        <span key={t} className="px-2 py-0.5 rounded bg-[#EEF4FF] text-[#1565D8] text-[11px] font-semibold">
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-3 text-xs text-slate-500 pt-1">
+                    {p.liveUrl && (
+                      <a href={p.liveUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 hover:text-[#1565D8]">
+                        <ExternalLink size={12} /> Demo
+                      </a>
+                    )}
+                    {p.repositoryUrl && (
+                      <a href={p.repositoryUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 hover:text-[#1565D8]">
+                        <Github size={12} /> Repo
+                      </a>
+                    )}
+                    {p.demoVideoUrl && (
+                      <a href={p.demoVideoUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 hover:text-[#1565D8]">
+                        <Video size={12} /> Video
+                      </a>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Footer with links & counts */}
-            <div className="px-5 pb-5 pt-3 border-t border-white/8 flex items-center justify-between text-xs">
-              <div className="flex items-center gap-3 text-text-secondary">
-                <span className="flex items-center gap-1 text-[11px]">
-                  <ThumbsUp className="w-3.5 h-3.5 text-aqua-400" /> {proj.likes}
-                </span>
-                <span className="flex items-center gap-1 text-[11px]">
-                  <Star className="w-3.5 h-3.5 text-amber" /> {proj.stars}
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {proj.githubUrl && (
-                  <a
-                    href={proj.githubUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="p-1.5 rounded-lg bg-white/5 text-text-secondary hover:text-white transition-colors"
-                    title="GitHub"
-                  >
-                    <Github className="w-4 h-4" />
-                  </a>
-                )}
-                {proj.demoUrl && (
-                  <a
-                    href={proj.demoUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="p-1.5 rounded-lg bg-white/5 text-text-secondary hover:text-white transition-colors"
-                    title="Live Demo"
-                  >
-                    <Globe className="w-4 h-4" />
-                  </a>
+              <div className="px-5 py-3.5 bg-slate-50/70 border-t border-slate-100 flex items-center gap-2 flex-wrap">
+                <Button variant="secondary" size="sm" onClick={() => setForm(fromProject(p))} leftIcon={<Edit3 size={13} />}>
+                  Edit
+                </Button>
+                <Button size="sm" href={`/dashboard/submissions?projectId=${p.id}`} leftIcon={<Send size={13} />}>
+                  Submit
+                </Button>
+                {p.ownerId === uid && (
+                  <Button variant="ghost" size="sm" onClick={() => setDeleting(p)} aria-label="Delete project" className="ml-auto text-red-600 hover:bg-red-50">
+                    <Trash2 size={14} />
+                  </Button>
                 )}
               </div>
             </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Add Project Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="card-glass max-w-lg w-full p-6 sm:p-8 rounded-3xl border border-white/20 bg-surface-1 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-white/8">
-              <h3 className="text-lg font-bold font-display">Add Project to Portfolio</h3>
-              <button
-                onClick={() => setShowAddModal(false)}
-                className="text-text-secondary hover:text-white p-2"
-              >
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleAddProject} className="space-y-4">
-              <div className="form-field">
-                <label className="label">Project Title</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. AgentSwarm IDE"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="input"
-                />
-              </div>
-
-              <div className="form-field">
-                <label className="label">Tagline</label>
-                <input
-                  type="text"
-                  placeholder="Brief summary of your build"
-                  value={tagline}
-                  onChange={(e) => setTagline(e.target.value)}
-                  className="input"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="form-field">
-                  <label className="label">GitHub Repo</label>
-                  <input
-                    type="url"
-                    placeholder="https://github.com/..."
-                    value={githubUrl}
-                    onChange={(e) => setGithubUrl(e.target.value)}
-                    className="input text-xs"
-                  />
-                </div>
-                <div className="form-field">
-                  <label className="label">Demo URL</label>
-                  <input
-                    type="url"
-                    placeholder="https://..."
-                    value={demoUrl}
-                    onChange={(e) => setDemoUrl(e.target.value)}
-                    className="input text-xs"
-                  />
-                </div>
-              </div>
-
-              <div className="form-field">
-                <label className="label">Technologies (comma separated)</label>
-                <input
-                  type="text"
-                  placeholder="Next.js, Python, Tailwind, Supabase"
-                  value={tags}
-                  onChange={(e) => setTags(e.target.value)}
-                  className="input text-xs"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-white/8">
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="btn-secondary text-xs"
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary text-xs">
-                  Publish to Portfolio
-                </button>
-              </div>
-            </form>
-          </div>
+          ))}
         </div>
       )}
+
+      {/* Create / Edit Project Modal */}
+      <Modal open={!!form} onClose={() => setForm(null)} title={form?.isNew ? "Create Project" : "Edit Project"} maxWidth="max-w-3xl">
+        {form && (
+          <form onSubmit={saveProject} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Input label="Project Title *" required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g. MedScan AI" />
+              <Input label="One-line Tagline" value={form.tagline} onChange={(e) => setForm({ ...form, tagline: e.target.value })} placeholder="What makes it stand out?" />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Input label="GitHub / Repo URL" type="url" value={form.repositoryUrl} onChange={(e) => setForm({ ...form, repositoryUrl: e.target.value })} placeholder="https://github.com/..." />
+              <Input label="Live Demo URL" type="url" value={form.liveUrl} onChange={(e) => setForm({ ...form, liveUrl: e.target.value })} placeholder="https://..." />
+              <Input label="Demo Video URL" type="url" value={form.demoVideoUrl} onChange={(e) => setForm({ ...form, demoVideoUrl: e.target.value })} placeholder="https://youtube.com/..." />
+            </div>
+
+            <Input
+              label="Tech Stack (comma separated)"
+              value={form.technologies}
+              onChange={(e) => setForm({ ...form, technologies: e.target.value })}
+              placeholder="Next.js, Firebase, PyTorch, Tailwind CSS"
+            />
+
+            <div className="form-field">
+              <label className="label">Cover Image</label>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="btn-secondary btn-sm cursor-pointer">
+                  <Upload size={14} /> {uploading !== null ? `Uploading ${uploading}%...` : "Upload Cover"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void handleCoverUpload(f);
+                    }}
+                  />
+                </label>
+                {form.coverImage && (
+                  <span className="text-xs text-emerald-700 font-medium truncate max-w-xs">Cover image attached</span>
+                )}
+              </div>
+            </div>
+
+            <MarkdownEditor
+              label="Project Overview & What It Does *"
+              required
+              rows={6}
+              value={form.description}
+              onChange={(next) => setForm({ ...form, description: next })}
+              placeholder="Explain the problem, architecture, and key features using Markdown..."
+            />
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Textarea label="Inspiration" rows={3} value={form.inspiration} onChange={(e) => setForm({ ...form, inspiration: e.target.value })} />
+              <Textarea label="How We Built It" rows={3} value={form.howItWorks} onChange={(e) => setForm({ ...form, howItWorks: e.target.value })} />
+              <Textarea label="Challenges & Lessons" rows={3} value={form.challenges} onChange={(e) => setForm({ ...form, challenges: e.target.value })} />
+              <Textarea label="What's Next" rows={3} value={form.futurePlans} onChange={(e) => setForm({ ...form, futurePlans: e.target.value })} />
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 text-xs sm:text-sm font-medium text-slate-700 cursor-pointer">
+                  <input type="checkbox" checked={form.isPublic} onChange={(e) => setForm({ ...form, isPublic: e.target.checked })} className="rounded border-slate-300" />
+                  Visible in Project Gallery
+                </label>
+                <label className="flex items-center gap-2 text-xs sm:text-sm font-medium text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.status === "published"}
+                    onChange={(e) => setForm({ ...form, status: e.target.checked ? "published" : "draft" })}
+                    className="rounded border-slate-300"
+                  />
+                  Published
+                </label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="secondary" type="button" onClick={() => setForm(null)}>
+                  Cancel
+                </Button>
+                <Button type="submit" loading={saving}>
+                  Save Project
+                </Button>
+              </div>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      <ConfirmDialog
+        open={!!deleting}
+        onClose={() => setDeleting(null)}
+        onConfirm={confirmDelete}
+        loading={delBusy}
+        danger
+        title={`Delete "${deleting?.title}"?`}
+        message="This removes the project permanently from your portfolio."
+        confirmLabel="Delete Project"
+      />
     </div>
   );
 }

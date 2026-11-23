@@ -1086,3 +1086,33 @@ export type HackathonSortOption =
   | "most_participants"
   | "largest_prize"
   | "most_relevant";
+
+export type TeamInvitation = {
+  id: string;
+  teamId: string;
+  teamName: string;
+  hackathonId: string;
+  inviterId: string;
+  inviteeEmail: string;
+  inviteCode?: string;
+  status: "pending" | "accepted" | "declined" | "expired";
+  createdAt?: unknown;
+};
+
+export type TeamWithEvent = Team & {
+  hackathonName?: string;
+  hackathonSlug?: string;
+};
+
+export type SubmissionWithMeta = Submission & {
+  hackathonName?: string;
+  hackathonSlug?: string;
+  organizerId?: string;
+  projectTitle?: string;
+  projectTagline?: string;
+  technologies?: string[];
+  coverImage?: string | null;
+  teamName?: string | null;
+  memberIds?: string[];
+};
+

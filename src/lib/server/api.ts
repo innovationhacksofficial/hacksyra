@@ -1,6 +1,6 @@
 import "server-only";
 import { NextResponse, type NextRequest } from "next/server";
-import { ZodError, type ZodType } from "zod";
+import { ZodError, type ZodType, type ZodTypeDef } from "zod";
 import { cookies } from "next/headers";
 import { adminAuth, AdminNotConfiguredError } from "@/lib/firebase/admin";
 import { SESSION_COOKIE, type SessionUser } from "@/lib/auth/server";
@@ -135,7 +135,7 @@ export type RouteCtx<B, P> = {
 
 type Options<B> = {
   auth?: AuthMode;
-  body?: ZodType<B>;
+  body?: ZodType<B, ZodTypeDef, unknown>;
   /** e.g. { limit: 10, windowSec: 60 }. Keyed by user (if signed in) else IP. */
   rateLimit?: { limit: number; windowSec: number; name?: string };
   /** Skip same-origin check (webhooks, cron). */

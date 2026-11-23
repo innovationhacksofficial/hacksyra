@@ -77,6 +77,12 @@
       { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
     { "collectionGroup": "certificates", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "issuedAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "certificates", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "hackathonId", "order": "ASCENDING" }, { "fieldPath": "issuedAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "teams", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "hackathonId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "submissions", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "hackathonId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
     { "collectionGroup": "bookmarks", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
     { "collectionGroup": "auditLogs", "queryScope": "COLLECTION", "fields": [

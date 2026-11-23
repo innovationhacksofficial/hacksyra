@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Plus, Trash2, CheckCircle2, AlertCircle, ArrowUp, ArrowDown, Trophy, Sparkles } from "lucide-react";
 import { nanoid } from "nanoid";
+import { isLive } from "@/lib/domain/status";
 import { validateAllWizardSteps } from "@/lib/domain/hackathon-schema";
 import { rubricTotal } from "@/lib/domain/rubric";
 import { formatMajor, formatMoney } from "@/lib/domain/money";
@@ -881,6 +882,27 @@ export function Step9ReviewPay({
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (isLive(data.status)) {
+    return (
+      <div className="p-6 sm:p-8 rounded-3xl bg-[#EEF4FF] border border-[#B3D1FF] text-center space-y-4">
+        <div className="w-16 h-16 rounded-2xl bg-white text-[#1565D8] flex items-center justify-center mx-auto shadow-xs">
+          <CheckCircle2 size={30} />
+        </div>
+        <StatusBadge status={data.status} />
+        <h2 className="font-display font-bold text-2xl text-slate-900">This Hackathon is Live!</h2>
+        <p className="text-sm text-slate-600 max-w-md mx-auto">
+          All changes are autosaved. Minor updates (schedule, FAQ, media) go live immediately; edits to event dates, prizes, or rules will route through a quick admin verification.
+        </p>
+        <div className="flex flex-wrap justify-center gap-3 pt-2">
+          {data.slug && <Button href={`/hackathons/${data.slug}`}>View Live Page</Button>}
+          <Button variant="secondary" href="/organizer/events">
+            Manage Events
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   if (data.status === "pending_review") {

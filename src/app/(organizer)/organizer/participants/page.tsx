@@ -1,283 +1,334 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { collection, orderBy, query, where } from "firebase/firestore";
+import jsQR from "jsqr";
+import { Check, Download, QrCode, Search, Users, X } from "lucide-react";
+import { clientDb, firebaseReady } from "@/lib/firebase/client";
+import { COLLECTIONS } from "@/lib/firebase/collections";
+import { useAuth } from "@/components/providers/AuthProvider";
+import { useLiveQuery } from "@/lib/data/live";
+import { useMyHackathons } from "@/lib/data/hooks";
+import { api } from "@/lib/api-client";
+import { formatInZone, toDate } from "@/lib/domain/dates";
 import {
-  Users, Search, Filter, Download, CheckCircle2, XCircle,
-  Mail, ExternalLink, ShieldCheck, UserCheck, AlertCircle,
-  Sparkles
-} from "lucide-react";
+  Button,
+  CardSkeleton,
+  DataList,
+  EmptyState,
+  Input,
+  Modal,
+  NotConfigured,
+  PageHeader,
+  StatusBadge,
+  useToast,
+} from "@/components/ui";
+import type { Registration } from "@/types";
 
-interface Participant {
-  id: string;
-  name: string;
-  email: string;
-  avatar: string;
-  team: string;
-  role: "Lead" | "Member" | "Solo";
-  track: string;
-  college: string;
-  checkedIn: boolean;
-  registeredAt: string;
-}
+function ParticipantsInner() {
+  const { firebaseUser, notConfigured } = useAuth();
+  const params = useSearchParams();
+  const toast = useToast();
+  const uid = firebaseUser?.uid;
+  const ready = Boolean(uid && firebaseReady());
 
-const DEMO_PARTICIPANTS: Participant[] = [
-  {
-    id: "p1",
-    name: "Rohan Varma",
-    email: "rohan.v@gmail.com",
-    avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80",
-    team: "NeuralSynthetix",
-    role: "Lead",
-    track: "Generative AI",
-    college: "IIT Bombay",
-    checkedIn: true,
-    registeredAt: "Oct 12, 2026",
-  },
-  {
-    id: "p2",
-    name: "Aaditi Deshmukh",
-    email: "aaditi.d@outlook.com",
-    avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=80",
-    team: "NeuralSynthetix",
-    role: "Member",
-    track: "Generative AI",
-    college: "IIT Bombay",
-    checkedIn: true,
-    registeredAt: "Oct 12, 2026",
-  },
-  {
-    id: "p3",
-    name: "Karan Singhania",
-    email: "karan.s@bits-pilani.ac.in",
-    avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80",
-    team: "ZeroState Labs",
-    role: "Lead",
-    track: "Systems & Cloud",
-    college: "BITS Pilani",
-    checkedIn: true,
-    registeredAt: "Oct 14, 2026",
-  },
-  {
-    id: "p4",
-    name: "Sneha Mukherjee",
-    email: "sneha.m@iiit.ac.in",
-    avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80",
-    team: "ZeroState Labs",
-    role: "Member",
-    track: "Systems & Cloud",
-    college: "IIIT Hyderabad",
-    checkedIn: false,
-    registeredAt: "Oct 14, 2026",
-  },
-  {
-    id: "p5",
-    name: "Tanmay Bhasin",
-    email: "tanmay.b@delhiuniv.ac.in",
-    avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&auto=format&fit=crop&q=80",
-    team: "Solo Builder",
-    role: "Solo",
-    track: "Open Innovation",
-    college: "Delhi University",
-    checkedIn: false,
-    registeredAt: "Oct 15, 2026",
-  },
-  {
-    id: "p6",
-    name: "Pooja Hegde",
-    email: "pooja.h@annauniv.edu",
-    avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100&auto=format&fit=crop&q=80",
-    team: "AgriVision AI",
-    role: "Lead",
-    track: "AI for Social Good",
-    college: "Anna University, Chennai",
-    checkedIn: true,
-    registeredAt: "Oct 16, 2026",
-  },
-];
-
-export default function ParticipantsManagementPage() {
-  const [participants, setParticipants] = useState<Participant[]>(DEMO_PARTICIPANTS);
+  const { data: events } = useMyHackathons(uid);
+  const [hackathonId, setHackathonId] = useState(params.get("hackathonId") ?? "all");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
-  const [filterCheckin, setFilterCheckin] = useState<string>("all");
+  const [busyId, setBusyId] = useState<string | null>(null);
 
-  const toggleCheckIn = (id: string) => {
-    setParticipants((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, checkedIn: !p.checkedIn } : p))
+  // Check-in Modal + QR Camera Scanner state
+  const [scanOpen, setScanOpen] = useState(false);
+  const [manualCode, setManualCode] = useState("");
+  const [scanning, setScanning] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [lastCheckIn, setLastCheckIn] = useState<{ attendeeName: string; ticketNumber: string; alreadyCheckedIn: boolean } | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const lockRef = useRef(false);
+
+  const { data: regs, isLoading } = useLiveQuery<Registration>(
+    ["org-participants", uid ?? null],
+    ready ? () => query(collection(clientDb(), COLLECTIONS.REGISTRATIONS), where("organizerId", "==", uid), orderBy("createdAt", "desc")) : null
+  );
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return (regs ?? []).filter((r) => {
+      if (hackathonId !== "all" && r.hackathonId !== hackathonId) return false;
+      if (statusFilter !== "all" && r.status !== statusFilter) return false;
+      if (q && !`${r.userName ?? ""} ${r.userEmail ?? ""} ${r.hackathonName ?? ""}`.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [regs, hackathonId, statusFilter, search]);
+
+  async function decide(regId: string, decision: "approve" | "reject") {
+    setBusyId(regId);
+    try {
+      await api(`/api/registrations/${regId}/decision`, { method: "POST", body: { decision } });
+      toast.success(decision === "approve" ? "Participant approved" : "Registration rejected");
+    } catch (e) {
+      toast.error("Action failed", e instanceof Error ? e.message : undefined);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  function exportCsv() {
+    const headers = ["Name", "Email", "Hackathon", "Status", "Type", "Registered At"];
+    const escape = (v: string) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const rows = filtered.map((r) =>
+      [
+        r.userName ?? "",
+        r.userEmail ?? "",
+        r.hackathonName ?? "",
+        r.status,
+        r.registrationType,
+        formatInZone(toDate(r.createdAt)),
+      ]
+        .map(escape)
+        .join(",")
     );
-  };
+    const blob = new Blob([[headers.join(","), ...rows].join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `participants-${hackathonId}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
-  const filtered = participants.filter((p) => {
-    const matchesSearch =
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.email.toLowerCase().includes(search.toLowerCase()) ||
-      p.team.toLowerCase().includes(search.toLowerCase()) ||
-      p.college.toLowerCase().includes(search.toLowerCase());
+  async function submitCheckIn(code: string) {
+    if (!code.trim() || lockRef.current) return;
+    lockRef.current = true;
+    setScanning(true);
+    try {
+      const res = await api<{ attendeeName: string; ticketNumber: string; alreadyCheckedIn: boolean }>("/api/tickets/check-in", {
+        method: "POST",
+        body: { code: code.trim() },
+      });
+      setLastCheckIn(res);
+      setManualCode("");
+      toast.success(res.alreadyCheckedIn ? "Already checked in" : "Checked in!", res.attendeeName);
+    } catch (e) {
+      toast.error("Check-in failed", e instanceof Error ? e.message : undefined);
+    } finally {
+      setScanning(false);
+      window.setTimeout(() => {
+        lockRef.current = false;
+      }, 1500);
+    }
+  }
 
-    if (filterCheckin === "checked") return matchesSearch && p.checkedIn;
-    if (filterCheckin === "pending") return matchesSearch && !p.checkedIn;
-    return matchesSearch;
-  });
+  useEffect(() => {
+    if (!scanOpen) {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      return;
+    }
 
-  const checkedInCount = participants.filter((p) => p.checkedIn).length;
+    let cancelled = false;
+    let raf = 0;
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+
+    async function startCamera() {
+      setCameraError(null);
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraError("Camera not available — enter ticket code manually below.");
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        }
+        const tick = () => {
+          if (cancelled) return;
+          const v = videoRef.current;
+          if (v && v.readyState === v.HAVE_ENOUGH_DATA && ctx && !lockRef.current) {
+            canvas.width = v.videoWidth;
+            canvas.height = v.videoHeight;
+            ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+            const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const found = jsQR(img.data, img.width, img.height);
+            if (found?.data) {
+              void submitCheckIn(found.data);
+            }
+          }
+          raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+      } catch {
+        setCameraError("Camera permission denied or unavailable — enter ticket number manually below.");
+      }
+    }
+
+    void startCamera();
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanOpen]);
+
+  if (notConfigured) return <NotConfigured service="Firestore" />;
 
   return (
-    <div className="space-y-6">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold font-display text-slate-900">
-            Registered Builders &amp; Teams
-          </h1>
-          <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Live check-in verification, team rosters, and communication portal.
-          </p>
-        </div>
+    <div className="space-y-6 pb-8">
+      <PageHeader
+        title="Participants & Check-In"
+        description="Manage attendees in real time, approve pending applications, export CSVs, and scan QR passes."
+        actions={
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <Button variant="secondary" onClick={exportCsv} disabled={filtered.length === 0} leftIcon={<Download size={15} />}>
+              Export CSV ({filtered.length})
+            </Button>
+            <Button onClick={() => setScanOpen(true)} leftIcon={<QrCode size={16} />}>
+              Scan / Check-In QR
+            </Button>
+          </div>
+        }
+      />
 
-        <button
-          onClick={() => alert("Downloading participants CSV export...")}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs sm:text-sm shadow-xs transition-colors self-start sm:self-auto"
-        >
-          <Download className="w-4 h-4 text-slate-500" /> Export CSV Roster
-        </button>
-      </div>
-
-      {/* Stats row */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-sm">
-          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Registered</span>
-          <p className="text-2xl sm:text-3xl font-display font-black text-slate-900 mt-1">
-            {participants.length} Builders
-          </p>
-        </div>
-
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-sm">
-          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Checked-In Live</span>
-          <p className="text-2xl sm:text-3xl font-display font-black text-emerald-600 mt-1">
-            {checkedInCount} / {participants.length}
-          </p>
-        </div>
-
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-sm">
-          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Active Teams Formed</span>
-          <p className="text-2xl sm:text-3xl font-display font-black text-[#1565D8] mt-1">
-            3 Teams
-          </p>
-        </div>
-      </div>
-
-      {/* Filter and Search Bar */}
-      <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto">
-          {["all", "checked", "pending"].map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setFilterCheckin(tab)}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold capitalize whitespace-nowrap transition-all ${
-                filterCheckin === tab
-                  ? "bg-[#1565D8] text-white shadow-sm"
-                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
-              }`}
-            >
-              {tab === "all" ? "All Builders" : tab === "checked" ? "Checked In" : "Pending Check-In"}
-            </button>
+      {/* Filters */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <Input placeholder="Search name or email..." leftAdornment={<Search size={15} />} value={search} onChange={(e) => setSearch(e.target.value)} />
+        <select className="input" value={hackathonId} onChange={(e) => setHackathonId(e.target.value)}>
+          <option value="all">All my hackathons</option>
+          {(events ?? []).map((h) => (
+            <option key={h.id} value={h.id}>
+              {h.name || "Untitled"}
+            </option>
           ))}
-        </div>
-
-        <div className="relative w-full sm:w-72">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder="Search name, email, team, college..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-[#1565D8] focus:bg-white"
-          />
-        </div>
+        </select>
+        <select className="input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <option value="all">All statuses</option>
+          <option value="confirmed">Confirmed</option>
+          <option value="checked_in">Checked in</option>
+          <option value="pending_approval">Pending approval</option>
+          <option value="waitlisted">Waitlisted</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
       </div>
 
-      {/* Participants Table */}
-      <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-slate-500 uppercase text-[11px] font-bold tracking-wider border-b border-slate-200">
-              <tr>
-                <th className="px-6 py-4">Participant</th>
-                <th className="px-6 py-4">Team &amp; Role</th>
-                <th className="px-6 py-4">Track</th>
-                <th className="px-6 py-4">Institution</th>
-                <th className="px-6 py-4 text-center">Check-In Status</th>
-                <th className="px-6 py-4 text-center">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filtered.map((p) => (
-                <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <img
-                        src={p.avatar}
-                        alt={p.name}
-                        className="w-9 h-9 rounded-full object-cover border border-slate-200"
-                      />
-                      <div>
-                        <span className="font-bold text-slate-900 block text-xs">{p.name}</span>
-                        <span className="text-[11px] text-slate-500">{p.email}</span>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div>
-                      <span className="text-xs font-semibold text-slate-900 block">{p.team}</span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                        p.role === "Lead" ? "bg-blue-50 text-[#1565D8] border border-blue-100" : "bg-slate-100 text-slate-600"
-                      }`}>
-                        {p.role}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[11px] font-medium">
-                      {p.track}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-xs text-slate-600">
-                    {p.college}
-                  </td>
-                  <td className="px-6 py-4 text-center">
-                    <button
-                      onClick={() => toggleCheckIn(p.id)}
-                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-all ${
-                        p.checkedIn
-                          ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
-                          : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
-                      }`}
-                    >
-                      {p.checkedIn ? (
-                        <>
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Checked In
-                        </>
-                      ) : (
-                        <>
-                          <XCircle className="w-3.5 h-3.5 text-slate-400" /> Mark Check-In
-                        </>
-                      )}
-                    </button>
-                  </td>
-                  <td className="px-6 py-4 text-center">
-                    <button
-                      onClick={() => alert(`Opening message compose to ${p.name}`)}
-                      className="p-2 rounded-lg text-slate-400 hover:text-slate-800 hover:bg-slate-100 transition-colors"
-                      title="Send message"
-                    >
-                      <Mail className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {isLoading ? (
+        <CardSkeleton />
+      ) : filtered.length === 0 ? (
+        <EmptyState icon={<Users size={22} />} title="No participants found" description="Registrations update live as builders join your hackathons." />
+      ) : (
+        <DataList
+          items={filtered}
+          keyExtractor={(r) => r.id}
+          columns={[
+            {
+              key: "user",
+              header: "Participant",
+              cell: (r) => (
+                <div>
+                  <p className="font-semibold text-slate-900">{r.userName || "Builder"}</p>
+                  <p className="text-xs text-slate-500">{r.userEmail}</p>
+                </div>
+              ),
+            },
+            {
+              key: "event",
+              header: "Hackathon",
+              cell: (r) => <span className="text-xs sm:text-sm font-medium text-slate-700">{r.hackathonName}</span>,
+            },
+            {
+              key: "status",
+              header: "Status",
+              cell: (r) => <StatusBadge status={r.status} />,
+            },
+            {
+              key: "date",
+              header: "Registered",
+              cell: (r) => <span className="text-xs text-slate-500">{formatInZone(toDate(r.createdAt))}</span>,
+            },
+            {
+              key: "actions",
+              header: "Actions",
+              cell: (r) =>
+                r.status === "pending_approval" ? (
+                  <div className="flex items-center gap-1.5">
+                    <Button size="sm" loading={busyId === r.id} onClick={() => void decide(r.id, "approve")} leftIcon={<Check size={13} />}>
+                      Approve
+                    </Button>
+                    <Button size="sm" variant="danger" loading={busyId === r.id} onClick={() => void decide(r.id, "reject")} leftIcon={<X size={13} />}>
+                      Reject
+                    </Button>
+                  </div>
+                ) : (
+                  <span className="text-xs text-slate-400">{r.teamId ? "In Team" : "Solo"}</span>
+                ),
+            },
+          ]}
+        />
+      )}
+
+      {/* QR Scanner & Check-In Modal */}
+      <Modal open={scanOpen} onClose={() => setScanOpen(false)} title="Attendee QR Check-In" maxWidth="max-w-md">
+        <div className="space-y-4">
+          <div className="relative rounded-2xl overflow-hidden bg-slate-900 aspect-video flex items-center justify-center">
+            <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
+            {cameraError && (
+              <p className="absolute inset-0 flex items-center justify-center p-4 text-center text-xs text-slate-200 bg-slate-900/80">
+                {cameraError}
+              </p>
+            )}
+          </div>
+
+          {lastCheckIn && (
+            <div className="rounded-xl p-3.5 bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 space-y-0.5">
+              <p className="font-bold">
+                {lastCheckIn.alreadyCheckedIn ? "Already Checked In" : "Successfully Checked In ✓"}
+              </p>
+              <p>
+                <strong>{lastCheckIn.attendeeName}</strong> · <span className="font-mono">{lastCheckIn.ticketNumber}</span>
+              </p>
+            </div>
+          )}
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitCheckIn(manualCode);
+            }}
+            className="flex items-end gap-2"
+          >
+            <div className="flex-1">
+              <Input
+                label="Or enter Ticket Number / Code"
+                placeholder="e.g. TKT-..."
+                value={manualCode}
+                onChange={(e) => setManualCode(e.target.value)}
+              />
+            </div>
+            <Button type="submit" loading={scanning}>
+              Verify
+            </Button>
+          </form>
         </div>
-      </div>
+      </Modal>
     </div>
+  );
+}
+
+export default function OrganizerParticipantsPage() {
+  return (
+    <Suspense fallback={<CardSkeleton />}>
+      <ParticipantsInner />
+    </Suspense>
   );
 }
