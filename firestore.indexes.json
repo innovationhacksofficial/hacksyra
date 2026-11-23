@@ -81,6 +81,10 @@
       { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
     { "collectionGroup": "auditLogs", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "resource", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "organizations", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "verificationStatus", "order": "ASCENDING" }, { "fieldPath": "updatedAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "moderationReports", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
     { "collectionGroup": "evaluations", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "judgeId", "order": "ASCENDING" }, { "fieldPath": "hackathonId", "order": "ASCENDING" } ] }
   ],
