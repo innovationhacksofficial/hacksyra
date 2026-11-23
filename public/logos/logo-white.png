@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="icon" type="image/png" href="/logo-circle.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    
+    <!-- SEO Meta Tags -->
+    <title>Innovation Hacks | Build. Innovate. Impact.</title>
+    <meta name="description" content="The AI-powered ecosystem for innovators, developers, students, startups, and future builders. Join global hackathons, build projects, and launch your career." />
+    <meta name="keywords" content="hackathon, AI, developers, students, startups, innovation, coding, coding challenge" />
+    <meta name="author" content="Innovation Hacks" />
+    <meta name="robots" content="index, follow" />
+    <meta name="language" content="English" />
+    <meta name="revisit-after" content="7 days" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://innovationhacks.in/" />
+    <meta property="og:title" content="Innovation Hacks | Build. Innovate. Impact." />
+    <meta property="og:description" content="The AI-powered ecosystem for innovators, developers, students, startups, and future builders." />
+    <meta property="og:image" content="https://images.unsplash.com/photo-1504384308090-c894fdcc538d?w=1200&h=630&fit=crop" />
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:url" content="https://innovationhacks.in/" />
+    <meta property="twitter:title" content="Innovation Hacks | Build. Innovate. Impact." />
+    <meta property="twitter:description" content="The AI-powered ecosystem for innovators, developers, students, startups, and future builders." />
+    <meta property="twitter:image" content="https://images.unsplash.com/photo-1504384308090-c894fdcc538d?w=1200&h=630&fit=crop" />
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Hero image preloads — eliminates flash/flicker on first paint -->
+    <link rel="preload" as="image" href="https://res.cloudinary.com/dd0oko10a/image/upload/v1785495755/ChatGPT_Image_Jul_31_2026_04_30_52_PM_o69axm.png" />
+    <link rel="preload" as="image" href="https://res.cloudinary.com/dd0oko10a/image/upload/v1785495451/WhatsApp_Image_2026-07-31_at_16.27.01_vz0kao.jpg" />
+    <link rel="preload" as="image" href="https://res.cloudinary.com/dd0oko10a/image/upload/v1785495199/WhatsApp_Image_2026-07-31_at_16.22.14_fqdrga.jpg" />
+    
+    <!-- JSON-LD -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "Innovation Hacks",
+      "url": "https://innovationhacks.in",
+      "logo": "https://innovationhacks.in/logo-circle.png",
+      "description": "The AI-powered ecosystem for innovators, developers, students, startups, and future builders."
+    }
+    </script>
+    <script type="module" crossorigin src="/assets/index-CmfXMdDV.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BARhq_6y.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
