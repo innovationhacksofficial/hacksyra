@@ -2,6 +2,7 @@ import "server-only";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { adminAuth } from "@/lib/firebase/admin";
+import { publicEnv } from "@/lib/env";
 import { isAdminRole, normalizeRole } from "@/lib/auth/roles";
 import type { UserRole } from "@/types";
 
@@ -18,10 +19,13 @@ export type SessionUser = {
   role: UserRole;
 };
 
-export function sessionCookieOptions(maxAge = SESSION_MAX_AGE_SEC) {
+export function sessionCookieOptions(
+  maxAge = SESSION_MAX_AGE_SEC,
+  secure = publicEnv.appUrl.startsWith("https://")
+) {
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure,
     sameSite: "lax" as const,
     path: "/",
     maxAge,

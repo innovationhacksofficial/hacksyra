@@ -11,7 +11,7 @@ import {
   type Firestore,
 } from "firebase/firestore";
 import { getStorage, connectStorageEmulator, type FirebaseStorage } from "firebase/storage";
-import { publicEnv, isFirebaseClientConfigured, resolvedProjectId } from "@/lib/env";
+import { publicEnv, isFirebaseClientConfigured, isRealValue, resolvedProjectId } from "@/lib/env";
 
 export class FirebaseNotConfiguredError extends Error {
   constructor() {
@@ -47,12 +47,12 @@ function init(): Services {
   const emu = publicEnv.useEmulators;
   const projectId = resolvedProjectId()!;
   const config = {
-    apiKey: publicEnv.firebase.apiKey && !emu ? publicEnv.firebase.apiKey : publicEnv.firebase.apiKey || "demo-api-key",
-    authDomain: publicEnv.firebase.authDomain || `${projectId}.firebaseapp.com`,
+    apiKey: isRealValue(publicEnv.firebase.apiKey) ? publicEnv.firebase.apiKey : "demo-api-key",
+    authDomain: isRealValue(publicEnv.firebase.authDomain) ? publicEnv.firebase.authDomain : `${projectId}.firebaseapp.com`,
     projectId,
-    storageBucket: publicEnv.firebase.storageBucket || `${projectId}.appspot.com`,
-    messagingSenderId: publicEnv.firebase.messagingSenderId,
-    appId: publicEnv.firebase.appId,
+    storageBucket: isRealValue(publicEnv.firebase.storageBucket) ? publicEnv.firebase.storageBucket : `${projectId}.appspot.com`,
+    messagingSenderId: isRealValue(publicEnv.firebase.messagingSenderId) ? publicEnv.firebase.messagingSenderId : undefined,
+    appId: isRealValue(publicEnv.firebase.appId) ? publicEnv.firebase.appId : undefined,
   };
 
   const app = getApps().length ? getApp() : initializeApp(config);

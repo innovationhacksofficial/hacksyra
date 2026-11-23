@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { motion, useReducedMotion } from "framer-motion";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -12,6 +12,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signInWithPopup,
+  signOut as fbSignOut,
   GoogleAuthProvider,
   GithubAuthProvider,
   updateProfile,
@@ -20,6 +21,7 @@ import {
 import { Eye, EyeOff, AlertCircle, ArrowRight, Users, Trophy } from "lucide-react";
 import { clientAuth } from "@/lib/firebase/client";
 import { completeSignIn, authErrorMessage } from "@/lib/auth/client-flow";
+import { homeForRole, normalizeRole, safeNext } from "@/lib/auth/roles";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { publicEnv } from "@/lib/env";
 import { Button, Input, NotConfigured } from "@/components/ui";
@@ -71,10 +73,9 @@ function GithubIcon() {
 }
 
 export function AuthFlipCard({ initialMode }: { initialMode: "login" | "signup" }) {
-  const router = useRouter();
   const params = useSearchParams();
   const reduced = useReducedMotion();
-  const { firebaseUser, loading, notConfigured } = useAuth();
+  const { firebaseUser, role: currentRole, loading, notConfigured } = useAuth();
 
   const nextParam = params.get("next");
   const roleParam = params.get("role") === "organizer" ? "organizer" : "participant";
@@ -87,6 +88,7 @@ export function AuthFlipCard({ initialMode }: { initialMode: "login" | "signup" 
   const [authError, setAuthError] = useState<string | null>(null);
   const [autoRedirecting, setAutoRedirecting] = useState(false);
   const activeSubmitRef = useRef(false);
+  const triedAutoRef = useRef(false);
 
   const loginForm = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
@@ -98,18 +100,36 @@ export function AuthFlipCard({ initialMode }: { initialMode: "login" | "signup" 
     defaultValues: { displayName: "", email: "", password: "", confirmPassword: "" },
   });
 
-  // If the visitor already has a Firebase user session (e.g. visited /login while signed in), refresh cookie and enter.
+  // If the visitor already has a Firebase user session (e.g. visited /login while signed in), verify cookie once and enter.
   useEffect(() => {
-    if (loading || !firebaseUser || activeSubmitRef.current || autoRedirecting) return;
+    if (loading || !firebaseUser || activeSubmitRef.current || triedAutoRef.current) return;
+    triedAutoRef.current = true;
     setAutoRedirecting(true);
-    completeSignIn(firebaseUser, { next: nextParam })
-      .then(({ redirectTo }) => router.replace(redirectTo))
-      .catch(() => {
+
+    (async () => {
+      try {
+        const sessRes = await fetch("/api/auth/session", { credentials: "same-origin" });
+        const sess = (await sessRes.json().catch(() => ({}))) as { authenticated?: boolean; role?: string };
+        if (sess.authenticated) {
+          const dest = safeNext(nextParam) ?? homeForRole(normalizeRole(sess.role ?? currentRole));
+          window.location.assign(dest);
+          return;
+        }
+        const { redirectTo } = await completeSignIn(firebaseUser, { next: nextParam });
+        window.location.assign(redirectTo);
+      } catch (err) {
+        // Stale client session (e.g. auth_time > 5m) — sign out cleanly so the user can sign in again without looping.
+        await fbSignOut(clientAuth()).catch(() => {});
         setAutoRedirecting(false);
-      });
-  }, [loading, firebaseUser, nextParam, router, autoRedirecting]);
+        setAuthError(authErrorMessage(err));
+      }
+    })();
+  }, [loading, firebaseUser, nextParam, currentRole]);
 
   function flipTo(target: "login" | "signup") {
+    if (typeof document !== "undefined" && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
     setAuthError(null);
     setMode(target);
     const qs = new URLSearchParams(window.location.search);
@@ -123,7 +143,7 @@ export function AuthFlipCard({ initialMode }: { initialMode: "login" | "signup" 
     try {
       const cred = await signInWithEmailAndPassword(clientAuth(), values.email, values.password);
       const { redirectTo } = await completeSignIn(cred.user, { next: nextParam });
-      router.replace(redirectTo);
+      window.location.assign(redirectTo);
     } catch (err) {
       activeSubmitRef.current = false;
       setAuthError(authErrorMessage(err));
@@ -142,7 +162,7 @@ export function AuthFlipCard({ initialMode }: { initialMode: "login" | "signup" 
         displayName: values.displayName,
         next: nextParam,
       });
-      router.replace(redirectTo);
+      window.location.assign(redirectTo);
     } catch (err) {
       activeSubmitRef.current = false;
       setAuthError(authErrorMessage(err));
@@ -160,7 +180,7 @@ export function AuthFlipCard({ initialMode }: { initialMode: "login" | "signup" 
         requestedRole: mode === "signup" ? role : undefined,
         next: nextParam,
       });
-      router.replace(redirectTo);
+      window.location.assign(redirectTo);
     } catch (err) {
       activeSubmitRef.current = false;
       setAuthError(authErrorMessage(err));
@@ -248,7 +268,7 @@ export function AuthFlipCard({ initialMode }: { initialMode: "login" | "signup" 
       >
         {/* ───────────────── FRONT FACE: LOG IN (0 deg) ───────────────── */}
         <section
-          aria-hidden={isFlipped}
+          inert={isFlipped ? true : undefined}
           style={reduced ? undefined : { backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
           className={`[grid-area:1/1] ${
             isFlipped ? (reduced ? "hidden" : "pointer-events-none") : ""
@@ -354,7 +374,7 @@ export function AuthFlipCard({ initialMode }: { initialMode: "login" | "signup" 
 
         {/* ───────────────── BACK FACE: SIGN UP (180 deg) ───────────────── */}
         <section
-          aria-hidden={!isFlipped}
+          inert={!isFlipped ? true : undefined}
           style={
             reduced
               ? undefined
