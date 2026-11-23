@@ -63,8 +63,16 @@
       { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
     { "collectionGroup": "orders", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "organizerId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "orders", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "hackathonId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
     { "collectionGroup": "payments", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "payments", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "organizerId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "ticketTiers", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "hackathonId", "order": "ASCENDING" }, { "fieldPath": "isPublic", "order": "ASCENDING" }, { "fieldPath": "order", "order": "ASCENDING" } ] },
+    { "collectionGroup": "seatReservations", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "expiresAt", "order": "ASCENDING" } ] },
     { "collectionGroup": "tickets", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
     { "collectionGroup": "certificates", "queryScope": "COLLECTION", "fields": [

@@ -1,357 +1,536 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
+import { collection, doc, orderBy, query, where } from "firebase/firestore";
 import {
-  ArrowLeft, CheckCircle2, Trophy, Users, Shield, Sparkles,
-  CreditCard, Zap, Code, Mail, AlertCircle, ArrowRight, Download, QrCode
+  ArrowLeft,
+  CheckCircle2,
+  CreditCard,
+  ShieldCheck,
+  Tag,
+  Sparkles,
+  Calendar,
+  AlertCircle,
+  UploadCloud,
 } from "lucide-react";
+import { clientDb } from "@/lib/firebase/client";
+import { COLLECTIONS } from "@/lib/firebase/collections";
+import { useAuth } from "@/components/providers/AuthProvider";
+import { useHackathonBySlug } from "@/lib/data/hooks";
+import { useLiveDoc, useLiveQuery } from "@/lib/data/live";
+import { api, ApiClientError } from "@/lib/api-client";
+import { openRazorpayCheckout } from "@/lib/payments/checkout";
+import { uploadToStorage } from "@/lib/storage/upload";
+import { formatMoney } from "@/lib/domain/money";
+import { formatInZone, toDate } from "@/lib/domain/dates";
+import { isRegistrationOpenAt } from "@/lib/domain/status";
+import {
+  Button,
+  Countdown,
+  EmptyState,
+  Input,
+  NotConfigured,
+  Select,
+  Skeleton,
+  StatusBadge,
+  Textarea,
+  useToast,
+} from "@/components/ui";
+import { QrDisplay } from "@/components/payments/QrDisplay";
+import type { Registration, TicketTier } from "@/types";
+import type { TicketDoc } from "@/types/commerce";
+
+type RegApiResponse = {
+  requiresPayment: boolean;
+  status: string;
+  registrationId?: string;
+  ticketId?: string;
+  orderId?: string;
+  razorpayOrderId?: string;
+  amount?: number;
+  discount?: number;
+  subtotal?: number;
+  currency?: string;
+  keyId?: string;
+  devBypass?: boolean;
+};
 
 export default function RegisterHackathonPage() {
-  const params = useParams();
-  const slug = (params?.slug as string) || "india-ai-2026";
-  const router = useRouter();
+  const params = useParams<{ slug: string }>();
+  const slug = params?.slug;
+  const toast = useToast();
+  const { firebaseUser, user, loading: authLoading, notConfigured } = useAuth();
 
-  const [step, setStep] = useState<number>(1);
-  const [regType, setRegType] = useState<"team" | "join" | "solo">("team");
-  const [teamName, setTeamName] = useState<string>("NeuralSynthetix");
-  const [joinCode, setJoinCode] = useState<string>("");
-  const [track, setTrack] = useState<string>("Generative AI & LLMs");
-  const [ticketTier, setTicketTier] = useState<string>("free");
-  const [fullName, setFullName] = useState<string>("Aarav Sharma");
-  const [email, setEmail] = useState<string>("aarav.sharma@gmail.com");
-  const [github, setGithub] = useState<string>("aarav-dev");
-  const [college, setCollege] = useState<string>("IIT Bombay");
-  const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [isSuccess, setIsSuccess] = useState<boolean>(false);
+  const { data: hackRows, isLoading: hackLoading } = useHackathonBySlug(slug);
+  const hackathon = hackRows?.[0];
 
-  function handleCompleteRegistration() {
-    setIsProcessing(true);
-    setTimeout(() => {
-      setIsProcessing(false);
-      setIsSuccess(true);
-    }, 1200);
+  const { data: tiers } = useLiveQuery<TicketTier>(
+    ["tiers", hackathon?.id ?? null],
+    hackathon?.id
+      ? () =>
+          query(
+            collection(clientDb(), COLLECTIONS.TICKET_TIERS),
+            where("hackathonId", "==", hackathon.id),
+            where("isPublic", "==", true),
+            orderBy("order", "asc")
+          )
+      : null
+  );
+
+  const regId = hackathon?.id && firebaseUser?.uid ? `${hackathon.id}_${firebaseUser.uid}` : null;
+  const { data: existingReg } = useLiveDoc<Registration>(
+    ["registration", regId],
+    regId ? () => doc(clientDb(), COLLECTIONS.REGISTRATIONS, regId) : null
+  );
+  const ticketId = existingReg?.ticketId;
+  const { data: myTicket } = useLiveDoc<TicketDoc>(
+    ["ticket", ticketId ?? null],
+    ticketId ? () => doc(clientDb(), COLLECTIONS.TICKETS, ticketId) : null
+  );
+
+  const [selectedTierId, setSelectedTierId] = useState<string>("");
+  const [selectedTrackId, setSelectedTrackId] = useState<string>("");
+  const [inviteCode, setInviteCode] = useState<string>("");
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [couponInput, setCouponInput] = useState("");
+  const [couponState, setCouponState] = useState<{ ok: boolean; discount: number; total: number; reason?: string } | null>(null);
+  const [checkingCoupon, setCheckingCoupon] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [devCheckout, setDevCheckout] = useState<RegApiResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const activeTier = useMemo(() => {
+    if (!tiers?.length) return undefined;
+    return tiers.find((t) => t.id === selectedTierId) ?? tiers[0];
+  }, [tiers, selectedTierId]);
+
+  if (notConfigured) {
+    return (
+      <div className="container-app py-10 max-w-2xl">
+        <NotConfigured service="Firebase" />
+      </div>
+    );
   }
 
-  if (isSuccess) {
+  if (hackLoading || authLoading) {
     return (
-      <div className="min-h-screen bg-midnight text-text-primary pt-24 pb-20 px-4">
-        <div className="max-w-xl mx-auto card-glass p-8 rounded-3xl border border-aqua-400/40 text-center bg-gradient-to-b from-aqua-400/10 via-surface-1 to-transparent">
-          <div className="w-16 h-16 rounded-2xl bg-aqua-400/20 text-aqua-400 flex items-center justify-center mx-auto mb-6">
-            <CheckCircle2 className="w-8 h-8" />
-          </div>
+      <div className="container-app py-10 max-w-2xl space-y-4">
+        <Skeleton className="h-10 w-64" />
+        <Skeleton className="h-80 rounded-2xl" />
+      </div>
+    );
+  }
 
-          <span className="badge-aqua mb-2">Registration Confirmed</span>
-          <h2 className="text-2xl font-black font-display mb-2">You&apos;re Officially in the Hackathon!</h2>
-          <p className="text-xs text-text-secondary mb-6 leading-relaxed">
-            Welcome to the <strong>India AI Innovation Challenge 2026</strong>.
-            Your ticket pass and team workspace have been generated.
+  if (!hackathon) {
+    return (
+      <div className="container-app py-12 max-w-xl">
+        <EmptyState
+          title="Hackathon not found"
+          description="This hackathon may not be approved yet or the link might be incorrect."
+          action={<Button href="/hackathons">Browse hackathons</Button>}
+        />
+      </div>
+    );
+  }
+
+  if (!firebaseUser) {
+    return (
+      <div className="container-app py-12 max-w-xl">
+        <div className="card p-8 text-center space-y-4">
+          <h1 className="font-display font-bold text-2xl text-slate-900">Sign in to register</h1>
+          <p className="text-sm text-slate-600">
+            Create an account or log in to register for <strong>{hackathon.name}</strong> and get your QR pass.
           </p>
-
-          {/* Ticket Pass preview */}
-          <div className="p-5 rounded-2xl bg-surface-2 border border-white/10 text-left mb-6 relative overflow-hidden">
-            <div className="flex items-center justify-between border-b border-white/8 pb-3 mb-3">
-              <div>
-                <span className="text-[10px] text-text-secondary uppercase">Attendee Pass</span>
-                <h4 className="font-bold text-sm text-white">{fullName}</h4>
-              </div>
-              <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-violet-500/20 text-violet-300 border border-violet-500/30">
-                #HACK-8849
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div>
-                <span className="text-[10px] text-text-secondary uppercase">Team</span>
-                <p className="font-semibold text-aqua-400">{regType === "solo" ? "Solo Hacker" : teamName}</p>
-              </div>
-              <div>
-                <span className="text-[10px] text-text-secondary uppercase">Track</span>
-                <p className="font-semibold text-white">{track}</p>
-              </div>
-              <div>
-                <span className="text-[10px] text-text-secondary uppercase">Affiliation</span>
-                <p className="text-text-secondary">{college}</p>
-              </div>
-              <div>
-                <span className="text-[10px] text-text-secondary uppercase">Event Format</span>
-                <p className="text-text-secondary">Online (Global)</p>
-              </div>
-            </div>
-
-            <div className="mt-4 pt-3 border-t border-white/8 flex items-center justify-between">
-              <div className="flex items-center gap-2 text-[11px] text-text-secondary">
-                <QrCode className="w-6 h-6 text-white" />
-                <span>Check-in QR active in your dashboard</span>
-              </div>
-              <span className="text-[11px] font-mono text-green-400 font-bold">STATUS: CONFIRMED</span>
-            </div>
-          </div>
-
-          <div className="flex flex-col sm:flex-row items-center gap-3 justify-center">
-            <Link
-              href="/dashboard"
-              className="btn-primary w-full sm:w-auto text-xs"
-            >
-              Open Builder Dashboard
-              <ArrowRight className="w-3.5 h-3.5 ml-1" />
-            </Link>
-            <Link
-              href={`/hackathons/${slug}`}
-              className="btn-secondary w-full sm:w-auto text-xs"
-            >
-              Back to Hackathon
-            </Link>
+          <div className="flex flex-wrap justify-center gap-3 pt-2">
+            <Button href={`/login?next=${encodeURIComponent(`/hackathons/${slug}/register`)}`}>Log in</Button>
+            <Button variant="secondary" href={`/signup?next=${encodeURIComponent(`/hackathons/${slug}/register`)}`}>
+              Sign up
+            </Button>
           </div>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-midnight text-text-primary pt-24 pb-20 px-4">
-      <div className="max-w-2xl mx-auto">
-        <Link
-          href={`/hackathons/${slug}`}
-          className="inline-flex items-center gap-2 text-text-secondary hover:text-white text-xs mb-6 transition-colors"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" /> Back to Hackathon Details
-        </Link>
+  const regOpen = isRegistrationOpenAt(hackathon);
 
-        <div className="card-glass p-6 sm:p-8 rounded-3xl border border-white/10">
-          <div className="flex items-center justify-between pb-6 border-b border-white/8 mb-6">
-            <div>
-              <span className="badge-violet text-[10px] uppercase font-bold tracking-wider mb-2">
-                HACKSYRA REGISTRATION
-              </span>
-              <h1 className="text-2xl font-extrabold font-display">
-                India AI Innovation Challenge 2026
-              </h1>
-              <p className="text-xs text-text-secondary mt-1">
-                48 Hours • ₹10,00,000 Prize Pool • An Innovation Hacks Event
-              </p>
-            </div>
+  // Already registered view
+  if (
+    existingReg &&
+    ["confirmed", "checked_in", "pending_approval", "waitlisted"].includes(existingReg.status)
+  ) {
+    return (
+      <div className="container-app py-10 max-w-xl">
+        <div className="card p-6 sm:p-8 space-y-6 text-center">
+          <div className="w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto">
+            <CheckCircle2 size={28} />
+          </div>
+          <div>
+            <StatusBadge status={existingReg.status} />
+            <h1 className="font-display font-bold text-2xl text-slate-900 mt-2">{hackathon.name}</h1>
+            <p className="text-sm text-slate-600 mt-1">
+              {existingReg.status === "confirmed"
+                ? "Your registration is confirmed! Present this QR pass at check-in."
+                : existingReg.status === "waitlisted"
+                  ? "You are on the waitlist. We'll notify you if a spot opens."
+                  : "Your application is awaiting organizer approval."}
+            </p>
           </div>
 
-          {/* Step 1: Participation Mode */}
-          {step === 1 && (
-            <div className="space-y-6">
-              <h3 className="font-bold text-sm text-white">Select Participation Mode</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setRegType("team")}
-                  className={`p-4 rounded-2xl border text-left transition-all ${
-                    regType === "team"
-                      ? "bg-violet-500/20 border-violet-500 text-white shadow-violet"
-                      : "bg-white/5 border-white/8 text-text-secondary hover:bg-white/10"
-                  }`}
-                >
-                  <Users className="w-5 h-5 text-violet-400 mb-2" />
-                  <div className="font-bold text-xs text-white">Create a Team</div>
-                  <div className="text-[11px] text-text-secondary mt-1">Lead a squad of 2-5 builders</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setRegType("join")}
-                  className={`p-4 rounded-2xl border text-left transition-all ${
-                    regType === "join"
-                      ? "bg-aqua-400/20 border-aqua-400 text-white shadow-aqua"
-                      : "bg-white/5 border-white/8 text-text-secondary hover:bg-white/10"
-                  }`}
-                >
-                  <Sparkles className="w-5 h-5 text-aqua-400 mb-2" />
-                  <div className="font-bold text-xs text-white">Join via Code</div>
-                  <div className="text-[11px] text-text-secondary mt-1">Have an invite code from team lead</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setRegType("solo")}
-                  className={`p-4 rounded-2xl border text-left transition-all ${
-                    regType === "solo"
-                      ? "bg-signal-blue/20 border-signal-blue text-white shadow-lg"
-                      : "bg-white/5 border-white/8 text-text-secondary hover:bg-white/10"
-                  }`}
-                >
-                  <Code className="w-5 h-5 text-signal-blue mb-2" />
-                  <div className="font-bold text-xs text-white">Solo Builder</div>
-                  <div className="text-[11px] text-text-secondary mt-1">Compete independently or match later</div>
-                </button>
-              </div>
-
-              {regType === "team" && (
-                <div className="form-field">
-                  <label className="label">Team Name</label>
-                  <input
-                    type="text"
-                    value={teamName}
-                    onChange={(e) => setTeamName(e.target.value)}
-                    placeholder="e.g. ByteBusters"
-                    className="input"
-                  />
-                </div>
-              )}
-
-              {regType === "join" && (
-                <div className="form-field">
-                  <label className="label">Team Invite Code</label>
-                  <input
-                    type="text"
-                    value={joinCode}
-                    onChange={(e) => setJoinCode(e.target.value)}
-                    placeholder="Enter 6-character code (e.g. AI-994)"
-                    className="input font-mono uppercase"
-                  />
-                </div>
-              )}
-
-              <div className="form-field">
-                <label className="label">Primary Track Interest</label>
-                <select
-                  value={track}
-                  onChange={(e) => setTrack(e.target.value)}
-                  className="input cursor-pointer"
-                >
-                  <option value="Generative AI & LLMs" className="bg-surface-1">Generative AI &amp; LLMs</option>
-                  <option value="Computer Vision" className="bg-surface-1">Computer Vision</option>
-                  <option value="NLP & Translation" className="bg-surface-1">NLP &amp; Translation</option>
-                  <option value="AI for Social Impact" className="bg-surface-1">AI for Social Impact</option>
-                  <option value="Open AI Track" className="bg-surface-1">Open AI Track</option>
-                </select>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={() => setStep(2)}
-                  className="btn-primary w-full justify-center"
-                >
-                  Continue to Builder Profile <ArrowRight className="w-4 h-4 ml-1.5" />
-                </button>
+          {myTicket && (
+            <div className="p-5 rounded-2xl bg-[#F8FAFC] border border-slate-200 flex flex-col items-center gap-3">
+              <QrDisplay value={myTicket.qrCode} size={170} />
+              <div className="text-xs space-y-0.5">
+                <p className="font-mono font-bold text-[#1565D8]">{myTicket.ticketNumber}</p>
+                <p className="font-semibold text-slate-900">{myTicket.attendeeName}</p>
+                <p className="text-slate-500">{myTicket.tierName}</p>
               </div>
             </div>
           )}
 
-          {/* Step 2: Builder Profile & Details */}
-          {step === 2 && (
-            <div className="space-y-5">
-              <h3 className="font-bold text-sm text-white">Your Developer Profile</h3>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="form-field">
-                  <label className="label">Full Name</label>
-                  <input
-                    type="text"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    className="input"
-                  />
-                </div>
-                <div className="form-field">
-                  <label className="label">Email Address</label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="input"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="form-field">
-                  <label className="label">GitHub Username</label>
-                  <div className="flex items-center rounded-xl bg-white/5 border border-white/10 px-3 py-2 text-xs">
-                    <span className="text-text-secondary">github.com/</span>
-                    <input
-                      type="text"
-                      value={github}
-                      onChange={(e) => setGithub(e.target.value)}
-                      className="bg-transparent text-white font-mono focus:outline-none flex-1 ml-1"
-                    />
-                  </div>
-                </div>
-
-                <div className="form-field">
-                  <label className="label">College / Organization</label>
-                  <input
-                    type="text"
-                    value={college}
-                    onChange={(e) => setCollege(e.target.value)}
-                    className="input"
-                    placeholder="e.g. IIT Delhi, Freelancer, TechCorp"
-                  />
-                </div>
-              </div>
-
-              {/* Pass Tier Selection */}
-              <div className="form-field pt-2">
-                <label className="label">Select Ticket Tier</label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <label
-                    onClick={() => setTicketTier("free")}
-                    className={`p-4 rounded-2xl border cursor-pointer flex flex-col justify-between ${
-                      ticketTier === "free"
-                        ? "bg-violet-500/15 border-violet-500/50"
-                        : "bg-white/5 border-white/8"
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-bold text-xs text-white">Free Standard Pass</span>
-                        <span className="badge-green text-[10px]">₹0</span>
-                      </div>
-                      <p className="text-[11px] text-text-secondary">
-                        Full 48-hr tournament access, discord channel, project submission &amp; certificates.
-                      </p>
-                    </div>
-                  </label>
-
-                  <label
-                    onClick={() => setTicketTier("vip")}
-                    className={`p-4 rounded-2xl border cursor-pointer flex flex-col justify-between ${
-                      ticketTier === "vip"
-                        ? "bg-amber/15 border-amber/50"
-                        : "bg-white/5 border-white/8"
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-bold text-xs text-white">VIP Hacker Kit Pass</span>
-                        <span className="badge-amber text-[10px]">₹499</span>
-                      </div>
-                      <p className="text-[11px] text-text-secondary">
-                        Includes official HACKSYRA T-shirt, stickers, and 1:1 mentor code review session.
-                      </p>
-                    </div>
-                  </label>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between pt-4">
-                <button
-                  type="button"
-                  onClick={() => setStep(1)}
-                  className="btn-secondary text-xs"
-                >
-                  <ArrowLeft className="w-3.5 h-3.5 mr-1" /> Back
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleCompleteRegistration}
-                  disabled={isProcessing}
-                  className="btn-primary text-xs"
-                >
-                  {isProcessing ? "Confirming Registration..." : "Confirm & Claim Ticket"}
-                </button>
-              </div>
-            </div>
-          )}
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <Button href={`/hackathons/${hackathon.slug}`}>Hackathon Page</Button>
+            <Button variant="secondary" href="/dashboard/teams">
+              Form / Join a Team
+            </Button>
+            <Button variant="secondary" href="/dashboard/tickets">
+              My Tickets
+            </Button>
+          </div>
         </div>
+      </div>
+    );
+  }
+
+  async function validateCoupon() {
+    if (!couponInput.trim() || !activeTier || !hackathon) return;
+    setCheckingCoupon(true);
+    try {
+      const r = await api<{ ok: boolean; discount: number; total: number; reason?: string }>(
+        `/api/coupons/validate?hackathonId=${encodeURIComponent(hackathon.id)}&code=${encodeURIComponent(
+          couponInput.trim()
+        )}&tierId=${encodeURIComponent(activeTier.id)}`
+      );
+      setCouponState(r);
+      if (r.ok) toast.success("Coupon applied!", `Saved ${formatMoney(r.discount)}`);
+      else toast.error("Invalid coupon", r.reason);
+    } catch (e) {
+      toast.error("Couldn't validate coupon", e instanceof Error ? e.message : undefined);
+    } finally {
+      setCheckingCoupon(false);
+    }
+  }
+
+  async function handleFileAnswer(questionId: string, file: File) {
+    if (!hackathon || !firebaseUser) return;
+    try {
+      const res = await uploadToStorage(
+        `registrations/${hackathon.id}/${firebaseUser.uid}/${questionId}_${file.name}`,
+        file,
+        { maxMb: 10, accept: ["image/", "application/pdf"] }
+      );
+      setAnswers((a) => ({ ...a, [questionId]: res.url }));
+      toast.success("File uploaded");
+    } catch (e) {
+      toast.error("Upload failed", e instanceof Error ? e.message : undefined);
+    }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!hackathon) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      const resp = await api<RegApiResponse>("/api/registrations", {
+        method: "POST",
+        body: {
+          hackathonId: hackathon.id,
+          tierId: activeTier?.id,
+          couponCode: couponState?.ok ? couponInput.trim() : undefined,
+          inviteCode: inviteCode.trim() || undefined,
+          trackId: selectedTrackId || undefined,
+          answers,
+        },
+      });
+
+      if (!resp.requiresPayment) {
+        toast.success("Registration submitted!");
+        return;
+      }
+
+      if (resp.devBypass) {
+        setDevCheckout(resp);
+        return;
+      }
+
+      const rzp = await openRazorpayCheckout({
+        key: resp.keyId!,
+        amount: resp.amount!,
+        currency: resp.currency || "INR",
+        description: `${hackathon.name} — ${activeTier?.name ?? "Registration"}`,
+        orderId: resp.razorpayOrderId!,
+        prefill: { name: user?.displayName || firebaseUser?.displayName || undefined, email: firebaseUser?.email || undefined },
+      });
+
+      await api("/api/payments/verify", {
+        method: "POST",
+        body: {
+          orderId: resp.orderId,
+          razorpayOrderId: rzp.razorpay_order_id,
+          razorpayPaymentId: rzp.razorpay_payment_id,
+          razorpaySignature: rzp.razorpay_signature,
+        },
+      });
+      toast.success("Payment verified & ticket issued!");
+    } catch (err) {
+      if (err instanceof ApiClientError && err.code === "not_configured") {
+        setError("Payments aren't configured yet. Add Razorpay keys or enable dev bypass in .env.local.");
+      } else {
+        setError(err instanceof Error ? err.message : "Could not complete registration.");
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function completeDevPayment() {
+    if (!devCheckout?.orderId) return;
+    setSubmitting(true);
+    try {
+      await api("/api/payments/verify", {
+        method: "POST",
+        body: { orderId: devCheckout.orderId, devBypass: true },
+      });
+      setDevCheckout(null);
+      toast.success("Dev registration confirmed!");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Dev verification failed.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const displaySubtotal = activeTier?.price ?? 0;
+  const displayTotal = couponState?.ok ? couponState.total : displaySubtotal;
+
+  return (
+    <div className="container-app py-8 sm:py-10 max-w-2xl space-y-6">
+      <Link href={`/hackathons/${hackathon.slug}`} className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-[#1565D8]">
+        <ArrowLeft size={14} /> Back to {hackathon.name}
+      </Link>
+
+      <div className="card p-6 sm:p-8 space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
+          <div>
+            <h1 className="font-display font-bold text-2xl text-slate-900">Register for {hackathon.name}</h1>
+            <p className="text-xs sm:text-sm text-slate-500 mt-1 flex items-center gap-1.5">
+              <Calendar size={14} /> Closes {formatInZone(toDate(hackathon.registrationCloseDate), hackathon.eventTimezone)}
+            </p>
+          </div>
+          <Countdown target={hackathon.registrationCloseDate} prefix="Closes in" />
+        </div>
+
+        {!regOpen ? (
+          <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 text-center space-y-2">
+            <p className="font-display font-bold text-base text-slate-900">Registration has closed</p>
+            <p className="text-xs text-slate-600">The registration deadline for this hackathon has passed.</p>
+          </div>
+        ) : devCheckout ? (
+          <div className="p-5 rounded-2xl bg-amber-50 border border-amber-200 space-y-4">
+            <p className="text-sm font-bold text-amber-900">Emulator Dev Mode: Simulate Ticket Payment</p>
+            <p className="text-xs text-amber-800">
+              Seat reserved for 15 minutes. Amount: <strong>{formatMoney(devCheckout.amount ?? 0)}</strong>.
+            </p>
+            <div className="flex gap-3">
+              <Button onClick={completeDevPayment} loading={submitting} leftIcon={<Sparkles size={15} />}>
+                Simulate Paid Ticket
+              </Button>
+              <Button variant="secondary" onClick={() => setDevCheckout(null)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {/* Read-only account summary */}
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div>
+                <span className="text-slate-400 uppercase font-bold block">Participant</span>
+                <span className="font-semibold text-slate-900 text-sm">{user?.displayName || firebaseUser.displayName || "Builder"}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 uppercase font-bold block">Email</span>
+                <span className="font-semibold text-slate-900 text-sm">{firebaseUser.email}</span>
+              </div>
+            </div>
+
+            {hackathon.visibility === "invite_only" && (
+              <Input
+                label="Event Invite Code"
+                required
+                placeholder="Enter invite code"
+                value={inviteCode}
+                onChange={(e) => setInviteCode(e.target.value)}
+              />
+            )}
+
+            {/* Ticket Tier Selection (for paid events) */}
+            {!hackathon.isFree && (tiers?.length ?? 0) > 0 && (
+              <div className="space-y-2">
+                <span className="label">Select Ticket Tier *</span>
+                <div className="space-y-2">
+                  {tiers!.map((t) => {
+                    const selected = activeTier?.id === t.id;
+                    const remaining = t.capacity != null ? Math.max(0, t.capacity - (t.sold ?? 0) - (t.reserved ?? 0)) : null;
+                    const soldOut = remaining === 0;
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        disabled={soldOut}
+                        onClick={() => {
+                          setSelectedTierId(t.id);
+                          setCouponState(null);
+                        }}
+                        className={`w-full p-4 rounded-2xl border text-left flex items-center justify-between gap-3 transition-all ${
+                          selected ? "border-[#1565D8] bg-[#EEF4FF]/60 ring-1 ring-[#1565D8]/20" : "border-slate-200 bg-white"
+                        } disabled:opacity-50`}
+                      >
+                        <div>
+                          <p className="font-display font-bold text-sm text-slate-900">{t.name}</p>
+                          {t.description && <p className="text-xs text-slate-500">{t.description}</p>}
+                          {remaining !== null && <p className="text-[11px] text-slate-500 mt-0.5">{soldOut ? "Sold out" : `${remaining} left`}</p>}
+                        </div>
+                        <span className="font-display font-bold text-base text-[#1565D8] tabular-nums">
+                          {t.price === 0 ? "Free" : formatMoney(t.price)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Coupon */}
+            {!hackathon.isFree && activeTier && activeTier.price > 0 && (
+              <div className="flex gap-2 items-end">
+                <div className="flex-1">
+                  <Input
+                    label="Coupon Code (optional)"
+                    placeholder="EARLY20"
+                    leftAdornment={<Tag size={15} />}
+                    value={couponInput}
+                    onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                  />
+                </div>
+                <Button variant="secondary" onClick={validateCoupon} loading={checkingCoupon}>
+                  Apply
+                </Button>
+              </div>
+            )}
+
+            {/* Preferred Track */}
+            {(hackathon.tracks?.length ?? 0) > 0 && (
+              <Select label="Preferred Track (optional)" value={selectedTrackId} onChange={(e) => setSelectedTrackId(e.target.value)}>
+                <option value="">Decide later</option>
+                {hackathon.tracks!.map((tr) => (
+                  <option key={tr.id} value={tr.id}>
+                    {tr.name}
+                  </option>
+                ))}
+              </Select>
+            )}
+
+            {/* Custom Registration Questions */}
+            {(hackathon.registrationQuestions ?? []).map((q) => (
+              <div key={q.id}>
+                {q.type === "textarea" ? (
+                  <Textarea
+                    label={q.label}
+                    required={q.required}
+                    value={answers[q.id] ?? ""}
+                    onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
+                  />
+                ) : q.type === "select" ? (
+                  <Select
+                    label={q.label}
+                    required={q.required}
+                    value={answers[q.id] ?? ""}
+                    onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
+                  >
+                    <option value="">Select an option</option>
+                    {(q.options ?? []).map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </Select>
+                ) : q.type === "file" ? (
+                  <div className="form-field">
+                    <span className="label">
+                      {q.label} {q.required && <span className="text-red-500">*</span>}
+                    </span>
+                    <label className="flex items-center gap-3 p-3.5 rounded-xl border border-dashed border-slate-300 bg-slate-50 cursor-pointer text-xs font-semibold text-slate-700 hover:border-[#1565D8]">
+                      <UploadCloud size={17} className="text-[#1565D8]" />
+                      <span>{answers[q.id] ? "File uploaded ✓ (click to replace)" : "Upload PDF or Image (≤ 10 MB)"}</span>
+                      <input
+                        type="file"
+                        accept="image/*,application/pdf"
+                        className="sr-only"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) void handleFileAnswer(q.id, f);
+                        }}
+                      />
+                    </label>
+                  </div>
+                ) : (
+                  <Input
+                    label={q.label}
+                    type={q.type === "url" ? "url" : "text"}
+                    required={q.required}
+                    value={answers[q.id] ?? ""}
+                    onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
+                  />
+                )}
+              </div>
+            ))}
+
+            {error && (
+              <div role="alert" className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2">
+                <AlertCircle size={15} className="shrink-0 mt-0.5" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="text-xs text-slate-600 flex items-center gap-2">
+                <ShieldCheck size={16} className="text-[#1565D8]" />
+                {hackathon.isFree || displayTotal === 0 ? (
+                  <span>Instant free pass &amp; QR ticket</span>
+                ) : (
+                  <span>
+                    Total due: <strong className="text-base text-slate-900">{formatMoney(displayTotal)}</strong>
+                    {couponState?.ok && (
+                      <span className="ml-1.5 text-emerald-700 font-semibold">(Saved {formatMoney(couponState.discount)})</span>
+                    )}
+                  </span>
+                )}
+              </div>
+              <Button
+                type="submit"
+                size="lg"
+                loading={submitting}
+                leftIcon={hackathon.isFree || displayTotal === 0 ? <CheckCircle2 size={17} /> : <CreditCard size={17} />}
+              >
+                {hackathon.isFree || displayTotal === 0 ? "Confirm Registration" : `Pay ${formatMoney(displayTotal)} & Register`}
+              </Button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );

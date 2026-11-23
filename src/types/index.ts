@@ -318,6 +318,8 @@ export type Hackathon = Timestamped & {
   registrationQuestions?: RegistrationQuestion[];
   stages?: HackathonStage[];
   resources?: HackathonResourceLink[];
+  pricingDraft?: HackathonPricingDraft;
+  resultsPublished?: boolean;
 
   // Derived / server-maintained
   totalPrizeInPaise?: number;
@@ -406,6 +408,30 @@ export type HackathonStage = {
   startDate: Timestamp;
   endDate: Timestamp;
   kind: "registration" | "submission" | "shortlisting" | "final" | "custom";
+};
+
+export type HackathonPricingDraft = {
+  isFree: boolean;
+  currency: string;
+  tiers: {
+    id: string;
+    name: string;
+    description?: string;
+    type: TicketTierType;
+    price: number; // paise
+    capacity?: number;
+    saleStartDate?: string;
+    saleEndDate?: string;
+    perPersonLimit: number;
+  }[];
+  coupons: {
+    id: string;
+    code: string;
+    type: "percentage" | "fixed";
+    value: number;
+    usageLimit?: number;
+    validUntil?: string;
+  }[];
 };
 
 export type HackathonResourceLink = { id: string; title: string; url: string; kind?: string };
@@ -581,12 +607,20 @@ export type RegistrationStatus =
 export type Registration = Timestamped & {
   id: string;
   hackathonId: string;
+  hackathonName?: string;
+  hackathonSlug?: string;
+  organizerId?: string;
   userId: string;
+  userName?: string;
+  userEmail?: string;
   teamId?: string;
+  trackId?: string;
+  tierId?: string;
   status: RegistrationStatus;
   registrationType: "individual" | "team_captain" | "team_member";
   ticketId?: string;
   orderId?: string;
+  answers?: Record<string, string>;
   approvedBy?: string;
   approvedAt?: Timestamp;
   rejectionReason?: string;

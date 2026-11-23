@@ -1,155 +1,156 @@
 "use client";
 
-import { useState } from "react";
-import {
-  Settings, Building, Globe, Mail, ShieldCheck, Key,
-  CheckCircle2, Save, ExternalLink, Sparkles
-} from "lucide-react";
+import { useEffect, useState } from "react";
+import { collection, doc, limit, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
+import { Building2, ShieldCheck, Save, CheckCircle2 } from "lucide-react";
+import { clientDb } from "@/lib/firebase/client";
+import { COLLECTIONS } from "@/lib/firebase/collections";
+import { useAuth } from "@/components/providers/AuthProvider";
+import { useLiveQuery } from "@/lib/data/live";
+import { api } from "@/lib/api-client";
+import { Button, Input, PageHeader, Select, Skeleton, StatusBadge, Textarea, useToast } from "@/components/ui";
+import type { Organization, OrgType } from "@/types";
 
 export default function OrganizerSettingsPage() {
-  const [saved, setSaved] = useState(false);
-  const [orgName, setOrgName] = useState("Innovation Hacks");
-  const [website, setWebsite] = useState("https://www.innovationhacks.in/");
-  const [email, setEmail] = useState("organizer@innovationhacks.in");
-  const [bio, setBio] = useState(
-    "Innovation Hacks is India's leading developer community and youth hackathon organizer, hosting flagship technology challenges in AI, Web3, FinTech, and Open Innovation."
-  );
-  const [razorpayKey, setRazorpayKey] = useState("rzp_live_84920491823");
+  const { firebaseUser, user } = useAuth();
+  const toast = useToast();
 
-  const handleSave = (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
-  };
+  const { data: orgs, isLoading } = useLiveQuery<Organization>(
+    ["my-org", firebaseUser?.uid ?? null],
+    firebaseUser?.uid
+      ? () => query(collection(clientDb(), COLLECTIONS.ORGANIZATIONS), where("ownerId", "==", firebaseUser.uid), limit(1))
+      : null
+  );
+  const org = orgs?.[0];
+
+  const [name, setName] = useState("");
+  const [type, setType] = useState<OrgType>("community");
+  const [website, setWebsite] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [country, setCountry] = useState("India");
+  const [description, setDescription] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (org) {
+      setName(org.name || "");
+      setType(org.type || "community");
+      setWebsite(org.website || "");
+      setContactEmail(org.contactEmail || "");
+      setCountry(org.country || "India");
+      setDescription(org.description || "");
+    } else if (user) {
+      setName(user.organization || user.displayName || "");
+      setContactEmail(user.email || "");
+      setCountry(user.country || "India");
+    }
+  }, [org, user]);
+
+  async function save(submitForVerification = false) {
+    if (!firebaseUser) return;
+    setSaving(true);
+    try {
+      await Promise.all([
+        api("/api/organizer/organization", {
+          method: "POST",
+          body: { name, type, website, contactEmail, country, description, submitForVerification },
+        }),
+        updateDoc(doc(clientDb(), COLLECTIONS.USERS, firebaseUser.uid), {
+          organization: name.trim(),
+          updatedAt: serverTimestamp(),
+        }),
+      ]);
+      toast.success(
+        submitForVerification ? "Verification requested" : "Organization settings saved",
+        submitForVerification ? "Admins will review your organizer profile shortly." : undefined
+      );
+    } catch (e) {
+      toast.error("Couldn't save settings", e instanceof Error ? e.message : undefined);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
-    <div className="space-y-6 max-w-4xl">
-      {/* Top Header */}
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-extrabold font-display text-slate-900">
-          Organizer Profile &amp; Settings
-        </h1>
-        <p className="text-xs sm:text-sm text-slate-500 mt-1">
-          Configure your official organization identity, public builder portal, and payment API credentials.
-        </p>
-      </div>
+    <div className="space-y-6 max-w-3xl">
+      <PageHeader
+        title="Organizer Profile & Verification"
+        description="Manage your organization identity shown on your hackathon pages. All payments are handled centrally via HACKSYRA's platform Razorpay account."
+        badge={org ? <StatusBadge status={org.verificationStatus} /> : undefined}
+      />
 
-      {saved && (
-        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs sm:text-sm font-semibold flex items-center gap-2">
-          <CheckCircle2 size={18} className="text-emerald-600" />
-          Organization settings saved successfully! Changes are live across all your public hackathon listings.
-        </div>
+      {isLoading ? (
+        <Skeleton className="h-80 rounded-2xl" />
+      ) : (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void save(false);
+          }}
+          className="card p-6 sm:p-8 space-y-5"
+        >
+          <div className="flex items-center gap-2 pb-3 border-b border-slate-100">
+            <Building2 size={18} className="text-[#1565D8]" />
+            <h2 className="font-display font-bold text-base text-slate-900">Organization Identity</h2>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Input label="Organization / Host Name" required value={name} onChange={(e) => setName(e.target.value)} />
+            <Select label="Organization Type" value={type} onChange={(e) => setType(e.target.value as OrgType)}>
+              <option value="college">College / Student Club</option>
+              <option value="university">University</option>
+              <option value="company">Company</option>
+              <option value="startup">Startup</option>
+              <option value="community">Developer Community</option>
+              <option value="nonprofit">Non-profit</option>
+              <option value="individual">Individual Host</option>
+            </Select>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Input label="Contact Email" type="email" required value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} />
+            <Input label="Website (optional)" type="url" placeholder="https://..." value={website} onChange={(e) => setWebsite(e.target.value)} />
+          </div>
+
+          <Input label="Country" required value={country} onChange={(e) => setCountry(e.target.value)} />
+
+          <Textarea
+            label="About the Organization"
+            rows={3}
+            placeholder="Describe your community or organization..."
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+
+          <div className="p-4 rounded-2xl bg-[#EEF4FF]/60 border border-[#DCE9FF] flex items-start gap-3 text-xs text-slate-700">
+            <ShieldCheck size={18} className="text-[#1565D8] shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold text-slate-900">Centralized Platform Payments</p>
+              <p className="mt-0.5 leading-relaxed">
+                Paid hackathon tickets and listing fees process securely through HACKSYRA&apos;s platform Razorpay account—there are no organizer API keys to configure. View your ticket revenue and issue refunds anytime from{" "}
+                <strong className="text-[#1565D8]">Organizer → Payments</strong>.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
+            {(!org || org.verificationStatus === "unverified" || org.verificationStatus === "more_info_required") && (
+              <Button
+                variant="outline"
+                type="button"
+                loading={saving}
+                onClick={() => void save(true)}
+                leftIcon={<CheckCircle2 size={15} />}
+              >
+                Request Organizer Verification
+              </Button>
+            )}
+            <Button type="submit" loading={saving} leftIcon={<Save size={15} />} className="ml-auto">
+              Save Organization
+            </Button>
+          </div>
+        </form>
       )}
-
-      <form onSubmit={handleSave} className="space-y-6">
-        {/* Organization Details */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200/90 shadow-sm space-y-4">
-          <h2 className="text-base font-display font-bold text-slate-900 flex items-center gap-2 pb-3 border-b border-slate-100">
-            <Building className="text-[#1565D8]" size={18} />
-            Organization Profile
-          </h2>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="label">Organization Name</label>
-              <input
-                type="text"
-                value={orgName}
-                onChange={(e) => setOrgName(e.target.value)}
-                className="input"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="label">Official Website</label>
-              <div className="relative">
-                <input
-                  type="url"
-                  value={website}
-                  onChange={(e) => setWebsite(e.target.value)}
-                  className="input pl-9"
-                  required
-                />
-                <Globe className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="label">Public Contact Email</label>
-              <div className="relative">
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="input pl-9"
-                  required
-                />
-                <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              </div>
-            </div>
-
-            <div>
-              <label className="label">Organizer Verification</label>
-              <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-100 flex items-center gap-2 text-xs font-semibold text-[#1565D8]">
-                <ShieldCheck size={16} />
-                <span>Verified Level 3 Partner · Innovation Hacks HQ</span>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <label className="label">About / Bio</label>
-            <textarea
-              rows={3}
-              value={bio}
-              onChange={(e) => setBio(e.target.value)}
-              className="input resize-none"
-            />
-          </div>
-        </div>
-
-        {/* Payment Credentials */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200/90 shadow-sm space-y-4">
-          <h2 className="text-base font-display font-bold text-slate-900 flex items-center gap-2 pb-3 border-b border-slate-100">
-            <Key className="text-amber-500" size={18} />
-            Payment Gateway &amp; Webhooks
-          </h2>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="label">Razorpay Key ID</label>
-              <input
-                type="text"
-                value={razorpayKey}
-                onChange={(e) => setRazorpayKey(e.target.value)}
-                className="input font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="label">Webhook Secret</label>
-              <input
-                type="password"
-                defaultValue="whsec_981249812903810"
-                className="input font-mono"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Submit Button */}
-        <div className="flex items-center justify-end gap-3 pt-2">
-          <button
-            type="submit"
-            className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-[#1565D8] hover:bg-[#0F52B0] text-white font-bold text-xs sm:text-sm shadow-sm transition-all"
-          >
-            <Save size={15} /> Save Changes
-          </button>
-        </div>
-      </form>
     </div>
   );
 }
