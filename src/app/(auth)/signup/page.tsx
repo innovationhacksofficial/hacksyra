@@ -10,8 +10,10 @@ import {
   GoogleAuthProvider,
   GithubAuthProvider,
   updateProfile,
+  sendEmailVerification,
 } from "firebase/auth";
-import { auth } from "@/lib/firebase/client";
+import { clientAuth } from "@/lib/firebase/client";
+import { completeSignIn, authErrorMessage } from "@/lib/auth/client-flow";
 import {
   Mail,
   Lock,
@@ -66,41 +68,35 @@ export default function SignupPage() {
 
     setIsSubmitting(true);
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const userCredential = await createUserWithEmailAndPassword(clientAuth(), email, password);
       await updateProfile(userCredential.user, { displayName });
-      if (role === "employer") {
-        router.push("/organizer");
-      } else {
-        router.push("/dashboard");
-      }
-    } catch (err: any) {
-      // Fallback for demo
-      if (role === "employer") {
-        router.push("/organizer");
-      } else {
-        router.push("/dashboard");
-      }
+      sendEmailVerification(userCredential.user).catch(() => {});
+      const { redirectTo } = await completeSignIn(userCredential.user, {
+        requestedRole: role === "employer" ? "organizer" : "participant",
+        displayName,
+        next: new URLSearchParams(window.location.search).get("next"),
+      });
+      router.replace(redirectTo);
+    } catch (err: unknown) {
+      setError(authErrorMessage(err));
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleOAuth = async (provider: "google" | "github") => {
+    setError(null);
     setOauthLoading(provider);
     try {
       const p = provider === "google" ? googleProvider : githubProvider;
-      await signInWithPopup(auth, p);
-      if (role === "employer") {
-        router.push("/organizer");
-      } else {
-        router.push("/dashboard");
-      }
-    } catch (err: any) {
-      if (role === "employer") {
-        router.push("/organizer");
-      } else {
-        router.push("/dashboard");
-      }
+      const cred = await signInWithPopup(clientAuth(), p);
+      const { redirectTo } = await completeSignIn(cred.user, {
+        requestedRole: role === "employer" ? "organizer" : "participant",
+        next: new URLSearchParams(window.location.search).get("next"),
+      });
+      router.replace(redirectTo);
+    } catch (err: unknown) {
+      setError(authErrorMessage(err));
     } finally {
       setOauthLoading(null);
     }

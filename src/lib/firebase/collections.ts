@@ -51,6 +51,34 @@ export const COLLECTIONS = {
   BOOKMARKS: "bookmarks",
   MENTORS: "mentors",
   MENTOR_SESSIONS: "mentorSessions",
+  // Platform & infra
+  USERNAMES: "usernames",
+  SLUGS: "slugs",
+  PLATFORM_SETTINGS: "platformSettings",
+  STATS: "stats",
+  WEBHOOK_EVENTS: "webhookEvents",
+  CONTACT_MESSAGES: "contactMessages",
+  REMINDER_LOG: "reminderLog",
+  TESTIMONIALS: "testimonials",
+  EMAIL_LOG: "emailLog",
+  PAYOUTS: "payouts",
+} as const;
+
+/** Well-known singleton document ids */
+export const DOCS = {
+  PLATFORM_SETTINGS: "main",
+  PLATFORM_STATS: "platform",
+} as const;
+
+/** Sub-collections under hackathons/{id} */
+export const SUB = {
+  ANNOUNCEMENTS: "announcements",
+  DISCUSSIONS: "discussions",
+  REPLIES: "replies",
+  JUDGES: "judges",
+  MESSAGES: "messages",
+  LIKES: "likes",
+  COMMENTS: "comments",
 } as const;
 
 export type CollectionName = (typeof COLLECTIONS)[keyof typeof COLLECTIONS];

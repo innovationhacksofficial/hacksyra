@@ -11,7 +11,13 @@ import {
   GoogleAuthProvider,
   GithubAuthProvider,
 } from "firebase/auth";
-import { auth } from "@/lib/firebase/client";
+import { clientAuth } from "@/lib/firebase/client";
+import { completeSignIn, authErrorMessage } from "@/lib/auth/client-flow";
+
+function searchNext(): string | null {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get("next");
+}
 import {
   Eye,
   EyeOff,
@@ -46,7 +52,7 @@ export default function LoginPage() {
   const [leftTab, setLeftTab] = useState<"jobs" | "competitions">("jobs");
 
   // Mode: OTP vs Password
-  const [authMode, setAuthMode] = useState<"otp" | "password">("otp");
+  const [authMode, setAuthMode] = useState<"otp" | "password">("password");
 
   // Form states
   const [email, setEmail] = useState("");
@@ -59,45 +65,40 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (authMode !== "password") {
+      setError("Email OTP sign-in isn't available yet. Please log in with your password.");
+      setAuthMode("password");
+      return;
+    }
     setIsSubmitting(true);
-
     try {
-      if (authMode === "password") {
-        await signInWithEmailAndPassword(auth, email, password);
-      }
-      if (role === "employer") {
-        router.push("/organizer");
-      } else {
-        router.push("/dashboard");
-      }
-    } catch (err: any) {
-      // Local fallback for smooth testing
-      if (role === "employer") {
-        router.push("/organizer");
-      } else {
-        router.push("/dashboard");
-      }
+      const cred = await signInWithEmailAndPassword(clientAuth(), email, password);
+      const { redirectTo } = await completeSignIn(cred.user, { next: searchNext() });
+      router.replace(redirectTo);
+    } catch (err: unknown) {
+      setError(authErrorMessage(err));
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleOAuth = async (provider: "google" | "github" | "microsoft" | "linkedin") => {
+    setError(null);
+    if (provider !== "google" && provider !== "github") {
+      setError("This sign-in option isn't available yet. Use Google or email instead.");
+      return;
+    }
     setOauthLoading(provider);
     try {
       const p = provider === "google" ? googleProvider : githubProvider;
-      await signInWithPopup(auth, p);
-      if (role === "employer") {
-        router.push("/organizer");
-      } else {
-        router.push("/dashboard");
-      }
-    } catch (err: any) {
-      if (role === "employer") {
-        router.push("/organizer");
-      } else {
-        router.push("/dashboard");
-      }
+      const cred = await signInWithPopup(clientAuth(), p);
+      const { redirectTo } = await completeSignIn(cred.user, {
+        requestedRole: role === "employer" ? "organizer" : "participant",
+        next: searchNext(),
+      });
+      router.replace(redirectTo);
+    } catch (err: unknown) {
+      setError(authErrorMessage(err));
     } finally {
       setOauthLoading(null);
     }

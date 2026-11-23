@@ -7,7 +7,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { sendPasswordResetEmail } from "firebase/auth";
-import { auth } from "@/lib/firebase/client";
+import { clientAuth } from "@/lib/firebase/client";
 import { Mail, Zap, ArrowLeft, CheckCircle2, AlertCircle } from "lucide-react";
 
 const schema = z.object({
@@ -27,11 +27,20 @@ export default function ForgotPasswordPage() {
 
   async function onSubmit(data: FormData) {
     try {
-      await sendPasswordResetEmail(auth, data.email);
+      await sendPasswordResetEmail(clientAuth(), data.email, { url: `${window.location.origin}/login` });
       setSent(true);
-    } catch (err: any) {
-      // Don't reveal user existence
-      setSent(true);
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code;
+      if (code === "auth/user-not-found") {
+        // Don't reveal whether the account exists
+        setSent(true);
+      } else if (code === "auth/too-many-requests") {
+        setError("email", { message: "Too many attempts. Please wait a minute and try again." });
+      } else if (code === "auth/invalid-email") {
+        setError("email", { message: "That email address doesn't look right." });
+      } else {
+        setError("email", { message: "We couldn't send the reset email. Please try again." });
+      }
     }
   }
 

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useForm } from "react-hook-form";
 import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "@/lib/firebase/client";
+import { clientDb } from "@/lib/firebase/client";
 import { COLLECTIONS } from "@/lib/firebase/collections";
 import { useAuth } from "@/components/providers/AuthProvider";
 import {
@@ -70,7 +70,7 @@ export default function OnboardingPage() {
     if (!user) return;
     setSaving(true);
     try {
-      await updateDoc(doc(db, COLLECTIONS.USERS, user.uid), {
+      await updateDoc(doc(clientDb(), COLLECTIONS.USERS, user.uid), {
         ...formData,
         onboardingComplete: true,
         updatedAt: serverTimestamp(),
@@ -86,7 +86,7 @@ export default function OnboardingPage() {
 
   async function skip() {
     if (!user) return;
-    await updateDoc(doc(db, COLLECTIONS.USERS, user.uid), {
+    await updateDoc(doc(clientDb(), COLLECTIONS.USERS, user.uid), {
       onboardingComplete: true,
       updatedAt: serverTimestamp(),
     });

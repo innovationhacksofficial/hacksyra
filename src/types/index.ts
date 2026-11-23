@@ -156,7 +156,10 @@ export type OrgMember = Timestamped & {
 
 export type HackathonStatus =
   | "draft"
+  | "payment_pending"
   | "pending_review"
+  | "more_info_required"
+  | "suspended"
   | "approved"
   | "published"
   | "registration_open"
@@ -300,6 +303,214 @@ export type Hackathon = Timestamped & {
   // Completion percentage (for wizard)
   completionPercentage: number;
   completedSteps: number[];
+
+  // ── Embedded sub-data (see DECISIONS.md D6) ──
+  organizerName?: string;
+  organizerPhotoURL?: string;
+  rules?: string;
+  faq?: HackathonFaqItem[];
+  tracks?: EmbeddedTrack[];
+  prizes?: EmbeddedPrize[];
+  sponsors?: EmbeddedSponsor[];
+  schedule?: EmbeddedScheduleItem[];
+  judgingCriteria?: JudgingCriterion[];
+  judgeInvites?: JudgeInvite[];
+  registrationQuestions?: RegistrationQuestion[];
+  stages?: HackathonStage[];
+  resources?: HackathonResourceLink[];
+
+  // Derived / server-maintained
+  totalPrizeInPaise?: number;
+  lowestTicketPriceInPaise?: number;
+  searchKeywords?: string[];
+  isListed?: boolean; // ★ server only: approved + public
+  isSeed?: boolean;
+  listingFee?: {
+    amountInPaise: number;
+    orderId?: string;
+    paymentId?: string;
+    paid: boolean;
+    paidAt?: Timestamp;
+    provider?: "razorpay" | "dev";
+  };
+  review?: {
+    submittedAt?: Timestamp;
+    reviewedAt?: Timestamp;
+    reviewedBy?: string;
+    decision?: "approved" | "rejected" | "more_info_required" | "suspended";
+    message?: string;
+    history?: { at: Timestamp; by: string; decision: string; message?: string }[];
+  };
+};
+
+export type HackathonFaqItem = { id: string; question: string; answer: string };
+
+export type EmbeddedTrack = {
+  id: string;
+  name: string;
+  description: string;
+  sponsorName?: string;
+};
+
+export type EmbeddedPrize = {
+  id: string;
+  name: string;
+  rank?: number;
+  type: "cash" | "non_cash";
+  cashAmount?: number; // major units (₹)
+  currency: string;
+  description?: string;
+  sponsorName?: string;
+  trackId?: string;
+  winnersCount: number;
+};
+
+export type EmbeddedSponsor = {
+  id: string;
+  name: string;
+  tier: "title" | "platinum" | "gold" | "silver" | "community" | "partner";
+  logoUrl?: string;
+  website?: string;
+};
+
+export type EmbeddedScheduleItem = {
+  id: string;
+  title: string;
+  type: HackathonScheduleItem["type"];
+  startTime: Timestamp;
+  endTime?: Timestamp;
+  location?: string;
+  meetingLink?: string;
+  description?: string;
+};
+
+export type JudgeInvite = {
+  email: string;
+  name?: string;
+  status: "invited" | "accepted" | "declined";
+  uid?: string;
+};
+
+export type RegistrationQuestion = {
+  id: string;
+  label: string;
+  type: "text" | "textarea" | "select" | "file" | "url";
+  options?: string[];
+  required: boolean;
+};
+
+export type HackathonStage = {
+  id: string;
+  name: string; // e.g. "Registration", "Idea submission", "Shortlisting", "Grand finale"
+  description?: string;
+  startDate: Timestamp;
+  endDate: Timestamp;
+  kind: "registration" | "submission" | "shortlisting" | "final" | "custom";
+};
+
+export type HackathonResourceLink = { id: string; title: string; url: string; kind?: string };
+
+// ============================================
+// PLATFORM
+// ============================================
+
+export type PlatformSettings = {
+  listingFeeInPaise: number; // default 300 (₹3)
+  listingFeeCurrency: "INR";
+  categories: { id: HackathonCategory; label: string }[];
+  featureFlags: Record<string, boolean>;
+  supportEmail?: string;
+  updatedAt?: Timestamp;
+  updatedBy?: string;
+};
+
+export type PlatformStats = {
+  users: number;
+  liveHackathons: number;
+  totalHackathons: number;
+  totalRegistrations: number;
+  totalProjects: number;
+  totalPrizePoolInPaise: number;
+  listingFeeRevenueInPaise: number;
+  updatedAt?: Timestamp;
+};
+
+export type Invoice = Timestamped & {
+  id: string;
+  invoiceNumber: string;
+  orderId: string;
+  paymentId: string;
+  userId: string;
+  hackathonId: string;
+  kind: "listing_fee" | "registration";
+  amount: number; // paise
+  currency: string;
+  lineItems: { description: string; amount: number }[];
+  billedTo: { name: string; email: string };
+};
+
+export type WebhookEvent = {
+  id: string; // Razorpay event id
+  event: string;
+  receivedAt: Timestamp;
+  processedAt?: Timestamp;
+  status: "processed" | "ignored" | "failed";
+  error?: string;
+};
+
+export type Announcement = Timestamped & {
+  id: string;
+  hackathonId: string;
+  authorId: string;
+  title: string;
+  body: string;
+  pinned: boolean;
+  emailed: boolean;
+};
+
+export type DiscussionThread = Timestamped & {
+  id: string;
+  hackathonId: string;
+  authorId: string;
+  authorName: string;
+  title: string;
+  body: string;
+  replyCount: number;
+  isAnswered: boolean;
+};
+
+export type DiscussionReply = Timestamped & {
+  id: string;
+  threadId: string;
+  authorId: string;
+  authorName: string;
+  body: string;
+  isOrganizer: boolean;
+};
+
+export type TeamMessage = {
+  id: string;
+  teamId: string;
+  senderId: string;
+  senderName: string;
+  senderPhotoURL?: string;
+  body: string;
+  createdAt: Timestamp;
+};
+
+export type Bookmark = {
+  id: string;
+  userId: string;
+  hackathonId: string;
+  createdAt: Timestamp;
+};
+
+export type Follow = {
+  id: string;
+  followerId: string;
+  targetId: string;
+  targetType: "user" | "organizer";
+  createdAt: Timestamp;
 };
 
 export type HackathonTrack = Timestamped & {

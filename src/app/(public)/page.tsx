@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import Image from "next/image";
 import { collection, query, orderBy, onSnapshot } from "firebase/firestore";
-import { db } from "@/lib/firebase/client";
+import { clientDb, firebaseReady } from "@/lib/firebase/client";
 import {
   Trophy,
   ArrowRight,
@@ -265,8 +265,8 @@ export default function HomePage() {
 
   useEffect(() => {
     try {
-      if (db && typeof db === "object" && "type" in db) {
-        const q = query(collection(db, "collaborations"), orderBy("order", "asc"));
+      if (firebaseReady()) {
+        const q = query(collection(clientDb(), "collaborations"), orderBy("order", "asc"));
         const unsub = onSnapshot(
           q,
           (snapshot) => {

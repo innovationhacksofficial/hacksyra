@@ -1,0 +1,45 @@
+rules_version = '2';
+
+// HACKSYRA — Cloud Storage rules. Public read for display media; writes are
+// owner-scoped with strict content-type and size limits.
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() { return request.auth != null; }
+    function isAdmin() { return signedIn() && request.auth.token.role in ['admin', 'super_admin']; }
+    function isImage() { return request.resource.contentType.matches('image/(png|jpe?g|webp|gif|svg\\+xml)'); }
+    function under(mb) { return request.resource.size < mb * 1024 * 1024; }
+    function hackathon(id) { return firestore.get(/databases/(default)/documents/hackathons/$(id)).data; }
+    function project(id) { return firestore.get(/databases/(default)/documents/projects/$(id)).data; }
+
+    // Avatars / covers: users/{uid}/...
+    match /users/{userId}/{file=**} {
+      allow read: if true;
+      allow write: if signedIn() && request.auth.uid == userId && (request.resource == null || (isImage() && under(5)));
+    }
+
+    // Hackathon media (cover, logo, banners, sponsor logos): hackathons/{hid}/...
+    match /hackathons/{hid}/{file=**} {
+      allow read: if true;
+      allow write: if signedIn()
+        && (hackathon(hid).organizerId == request.auth.uid || isAdmin())
+        && (request.resource == null || (isImage() && under(8)));
+    }
+
+    // Project gallery: projects/{pid}/...
+    match /projects/{pid}/{file=**} {
+      allow read: if true;
+      allow write: if signedIn()
+        && request.auth.uid in project(pid).memberIds
+        && (request.resource == null || (isImage() && under(8)));
+    }
+
+    // Registration file answers (private): registrations/{hid}/{uid}/...
+    match /registrations/{hid}/{userId}/{file=**} {
+      allow read: if signedIn() && (request.auth.uid == userId || hackathon(hid).organizerId == request.auth.uid || isAdmin());
+      allow write: if signedIn() && request.auth.uid == userId
+        && (request.resource == null || ((isImage() || request.resource.contentType == 'application/pdf') && under(10)));
+    }
+
+    match /{allPaths=**} { allow read, write: if false; }
+  }
+}
