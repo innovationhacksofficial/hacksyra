@@ -6,45 +6,28 @@ import { AuthProvider } from "@/components/providers/AuthProvider";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 import { Toaster } from "@/components/ui/Toaster";
 
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-  display: "swap",
-});
-
-const spaceGrotesk = Space_Grotesk({
-  subsets: ["latin"],
-  variable: "--font-space-grotesk",
-  display: "swap",
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  variable: "--font-jetbrains",
-  display: "swap",
-});
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
+const spaceGrotesk = Space_Grotesk({ subsets: ["latin"], variable: "--font-space-grotesk", display: "swap" });
+const jetbrainsMono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-jetbrains", display: "swap" });
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"),
   title: {
-    default: "HACKSYRA — Discover. Build. Compete.",
+    default: "HACKSYRA — Discover, Build & Host Hackathons",
     template: "%s | HACKSYRA",
   },
   description:
-    "Discover global hackathons, collaborate with talented builders, bring your ideas to life, and compete for opportunities that move innovation forward. An Innovation Hacks Product.",
+    "Discover global hackathons, form dream teams, ship projects, and host events in minutes. An Innovation Hacks product.",
   keywords: [
     "hackathon",
     "hackathons",
     "India hackathons",
     "developer competitions",
-    "coding challenges",
-    "innovation",
+    "host hackathon",
     "builders",
-    "tech events",
-    "startup competitions",
-    "AI hackathons",
+    "Innovation Hacks",
   ],
-  authors: [{ name: "Innovation Hacks", url: "https://hacksyra.com" }],
+  authors: [{ name: "Innovation Hacks", url: "https://innovationhacks.in" }],
   creator: "Innovation Hacks",
   publisher: "Innovation Hacks",
   robots: {
@@ -55,47 +38,34 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "en_IN",
-    url: "https://hacksyra.com",
-    title: "HACKSYRA — Discover. Build. Compete.",
-    description: "A Global Platform for Hackathons & Builders. An Innovation Hacks Product.",
     siteName: "HACKSYRA",
-    images: [{ url: "/og-image.png", width: 1200, height: 630, alt: "HACKSYRA" }],
+    title: "HACKSYRA — Discover, Build & Host Hackathons",
+    description: "Discover global hackathons, build in teams, and host events in minutes.",
   },
   twitter: {
     card: "summary_large_image",
-    title: "HACKSYRA — Discover. Build. Compete.",
-    description: "A Global Platform for Hackathons & Builders.",
-    images: ["/og-image.png"],
-    creator: "@hacksyra",
+    title: "HACKSYRA — Discover, Build & Host Hackathons",
+    description: "Discover global hackathons, build in teams, and host events in minutes.",
   },
   icons: {
-    icon: "/favicon.ico",
-    shortcut: "/favicon-16x16.png",
-    apple: "/apple-touch-icon.png",
+    icon: "/logos/favicon-32x32.png",
+    shortcut: "/favicon.ico",
+    apple: "/logos/apple-touch-icon.png",
   },
-  manifest: "/site.webmanifest",
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 5,
-  themeColor: [
-    { media: "(prefers-color-scheme: dark)", color: "#090D1A" },
-    { media: "(prefers-color-scheme: light)", color: "#F7F9FC" },
-  ],
+  viewportFit: "cover",
+  themeColor: "#1565D8",
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body
-        className={`${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} font-sans antialiased`}
-      >
+      <body className={`${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} font-sans antialiased bg-white text-slate-900`}>
         <ThemeProvider>
           <AuthProvider>
             <QueryProvider>

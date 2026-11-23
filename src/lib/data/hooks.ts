@@ -71,3 +71,4 @@ export function useNotifications(uid: string | null | undefined, max = 50) {
     ? () => query(collection(clientDb(), COLLECTIONS.NOTIFICATIONS), where("userId", "==", uid), orderBy("createdAt", "desc"), qLimit(max))
     : null);
 }
+

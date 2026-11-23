@@ -196,3 +196,4 @@ export function route<B = undefined, P = Record<string, string>>(
     }
   };
 }
+

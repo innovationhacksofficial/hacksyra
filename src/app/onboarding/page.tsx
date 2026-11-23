@@ -1,24 +1,35 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
-import { useForm } from "react-hook-form";
+import { Suspense, useEffect, useState } from "react";
+import Image from "next/image";
+import { useRouter, useSearchParams } from "next/navigation";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
-import { clientDb } from "@/lib/firebase/client";
+import {
+  User,
+  BookOpen,
+  Code2,
+  Target,
+  Rocket,
+  ChevronRight,
+  ChevronLeft,
+  Check,
+  SkipForward,
+  Search,
+} from "lucide-react";
+import { clientDb, firebaseReady } from "@/lib/firebase/client";
 import { COLLECTIONS } from "@/lib/firebase/collections";
 import { useAuth } from "@/components/providers/AuthProvider";
-import {
-  User, Globe, Code2, Zap, ChevronRight, ChevronLeft,
-  Check, BookOpen, Target, Rocket, SkipForward,
-} from "lucide-react";
+import { homeForRole, safeNext } from "@/lib/auth/roles";
+import { Button, Input, Select, Textarea, useToast } from "@/components/ui";
+import type { SocialLink } from "@/types";
 
 const STEPS = [
-  { id: 1, title: "Who are you?", icon: User, description: "Tell us a bit about yourself" },
-  { id: 2, title: "Your Background", icon: BookOpen, description: "Your college or organization" },
-  { id: 3, title: "Your Skills", icon: Code2, description: "What do you build with?" },
-  { id: 4, title: "Your Interests", icon: Target, description: "What excites you?" },
-  { id: 5, title: "You're all set!", icon: Rocket, description: "Welcome to HACKSYRA" },
+  { id: 1, title: "About you", icon: User, description: "Your bio, location and coding level" },
+  { id: 2, title: "Background", icon: BookOpen, description: "College, company and social links" },
+  { id: 3, title: "Skills", icon: Code2, description: "Tools and languages you build with" },
+  { id: 4, title: "Interests", icon: Target, description: "Domains that excite you" },
+  { id: 5, title: "All set!", icon: Rocket, description: "Ready to compete or host" },
 ];
 
 const SKILL_OPTIONS = [
@@ -26,7 +37,7 @@ const SKILL_OPTIONS = [
   "FastAPI", "Django", "Flutter", "Kotlin", "Swift", "Java",
   "Rust", "Go", "C++", "TensorFlow", "PyTorch", "Solidity",
   "AWS", "GCP", "Docker", "Kubernetes", "PostgreSQL", "MongoDB",
-  "Redis", "GraphQL", "Figma", "Unity", "WebAssembly", "Terraform",
+  "Redis", "GraphQL", "Figma", "Unity", "WebAssembly", "Tailwind CSS",
 ];
 
 const INTEREST_OPTIONS = [
@@ -36,29 +47,42 @@ const INTEREST_OPTIONS = [
 ];
 
 const EXPERIENCE_OPTIONS = [
-  { value: "beginner", label: "Beginner", description: "0-1 years coding" },
-  { value: "intermediate", label: "Intermediate", description: "1-3 years" },
-  { value: "advanced", label: "Advanced", description: "3-5 years" },
+  { value: "beginner", label: "Beginner", description: "0–1 years coding" },
+  { value: "intermediate", label: "Intermediate", description: "1–3 years" },
+  { value: "advanced", label: "Advanced", description: "3–5 years" },
   { value: "expert", label: "Expert", description: "5+ years" },
-];
+] as const;
 
-export default function OnboardingPage() {
+function OnboardingInner() {
   const router = useRouter();
-  const { user, refreshUser } = useAuth();
+  const params = useSearchParams();
+  const reduced = useReducedMotion();
+  const toast = useToast();
+  const { firebaseUser, user, role, loading } = useAuth();
+
+  const nextUrl = safeNext(params.get("next")) ?? homeForRole(role);
+
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
-
+  const [skillSearch, setSkillSearch] = useState("");
   const [formData, setFormData] = useState({
     bio: "",
-    country: "",
+    country: "IN",
     college: "",
+    organization: "",
     experienceLevel: "",
     skills: [] as string[],
     interests: [] as string[],
-    lookingForTeam: false,
+    lookingForTeam: true,
     githubUrl: "",
     linkedinUrl: "",
   });
+
+  useEffect(() => {
+    if (!loading && user?.onboardingComplete) {
+      router.replace(nextUrl);
+    }
+  }, [loading, user?.onboardingComplete, nextUrl, router]);
 
   function toggleItem(arr: string[], item: string, max?: number): string[] {
     if (arr.includes(item)) return arr.filter((i) => i !== item);
@@ -66,262 +90,304 @@ export default function OnboardingPage() {
     return [...arr, item];
   }
 
-  async function finish() {
-    if (!user) return;
+  async function saveAndContinue(skip = false) {
+    const uid = firebaseUser?.uid;
+    if (!uid || !firebaseReady()) return;
     setSaving(true);
     try {
-      await updateDoc(doc(clientDb(), COLLECTIONS.USERS, user.uid), {
-        ...formData,
-        onboardingComplete: true,
-        updatedAt: serverTimestamp(),
-      });
-      await refreshUser();
-      router.push("/dashboard");
-    } catch (err) {
-      console.error(err);
+      const db = clientDb();
+      const now = serverTimestamp();
+
+      if (skip) {
+        await updateDoc(doc(db, COLLECTIONS.USERS, uid), {
+          onboardingComplete: true,
+          updatedAt: now,
+        });
+      } else {
+        const socialLinks: SocialLink[] = [];
+        if (formData.githubUrl.trim()) socialLinks.push({ platform: "github", url: formData.githubUrl.trim() });
+        if (formData.linkedinUrl.trim()) socialLinks.push({ platform: "linkedin", url: formData.linkedinUrl.trim() });
+
+        const cleanExp = formData.experienceLevel || undefined;
+        await Promise.all([
+          updateDoc(doc(db, COLLECTIONS.USERS, uid), {
+            bio: formData.bio.trim(),
+            country: formData.country,
+            college: formData.college.trim(),
+            organization: formData.organization.trim(),
+            ...(cleanExp ? { experienceLevel: cleanExp } : {}),
+            skills: formData.skills,
+            interests: formData.interests,
+            lookingForTeam: formData.lookingForTeam,
+            githubUrl: formData.githubUrl.trim(),
+            linkedinUrl: formData.linkedinUrl.trim(),
+            onboardingComplete: true,
+            updatedAt: now,
+          }),
+          updateDoc(doc(db, COLLECTIONS.USER_PROFILES, uid), {
+            bio: formData.bio.trim(),
+            country: formData.country,
+            college: formData.college.trim(),
+            skills: formData.skills,
+            interests: formData.interests,
+            lookingForTeam: formData.lookingForTeam,
+            socialLinks,
+            updatedAt: now,
+          }),
+        ]);
+      }
+
+      toast.success("Profile updated", "Welcome to HACKSYRA!");
+      router.replace(nextUrl);
+    } catch {
+      toast.error("Couldn't save profile", "Check your connection and try again.");
     } finally {
       setSaving(false);
     }
   }
 
-  async function skip() {
-    if (!user) return;
-    await updateDoc(doc(clientDb(), COLLECTIONS.USERS, user.uid), {
-      onboardingComplete: true,
-      updatedAt: serverTimestamp(),
-    });
-    router.push("/dashboard");
-  }
-
   const progress = ((step - 1) / (STEPS.length - 1)) * 100;
   const currentStep = STEPS[step - 1];
+  const filteredSkills = SKILL_OPTIONS.filter((s) => s.toLowerCase().includes(skillSearch.trim().toLowerCase()));
 
   return (
-    <div className="min-h-screen bg-midnight flex items-center justify-center p-4">
-      <div className="w-full max-w-lg">
-        {/* Logo */}
-        <div className="flex items-center justify-center gap-2 mb-8">
-          <div className="w-8 h-8 rounded-lg bg-violet-gradient flex items-center justify-center">
-            <Zap size={16} className="text-white" />
+    <div className="min-h-screen bg-[#F0F5FF] flex flex-col justify-between py-6 sm:py-10 px-4 pb-24 sm:pb-10">
+      <div className="w-full max-w-xl mx-auto">
+        {/* Brand */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-white border border-slate-200 p-1 shadow-xs">
+              <Image src="/logos/ih_logo.png" alt="HACKSYRA" width={32} height={32} className="w-full h-full object-contain" />
+            </div>
+            <span className="font-display font-bold text-xl text-slate-900">
+              HACK<span className="text-[#1565D8]">SYRA</span>
+            </span>
           </div>
-          <span className="font-display text-xl font-bold text-text-primary">
-            HACK<span className="gradient-text">SYRA</span>
-          </span>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => saveAndContinue(true)}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-[#1565D8] transition-colors py-2 px-3 rounded-xl hover:bg-white/70"
+          >
+            <SkipForward size={14} /> Skip for now
+          </button>
         </div>
 
         {/* Progress */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm text-text-secondary">
+        <div className="mb-6">
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-600 mb-2">
+            <span>
               Step {step} of {STEPS.length}
             </span>
-            <button onClick={skip} className="flex items-center gap-1 text-xs text-text-secondary/60 hover:text-text-secondary transition-colors">
-              <SkipForward size={13} />
-              Skip setup
-            </button>
+            <span className="text-[#1565D8]">{Math.round(progress)}%</span>
           </div>
           <div className="progress-bar">
             <motion.div
               className="progress-fill"
-              animate={{ width: `${progress}%` }}
-              transition={{ duration: 0.4 }}
+              animate={{ width: `${Math.max(8, progress)}%` }}
+              transition={{ duration: reduced ? 0.01 : 0.35 }}
             />
-          </div>
-          <div className="flex items-center gap-2 mt-4">
-            {STEPS.map((s) => (
-              <div
-                key={s.id}
-                className={`flex-1 h-1 rounded-full transition-all duration-300 ${
-                  s.id < step ? "bg-aqua-400" : s.id === step ? "bg-violet-500" : "bg-white/10"
-                }`}
-              />
-            ))}
           </div>
         </div>
 
-        <div className="card p-8">
-          {/* Step header */}
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 rounded-xl bg-violet-500/15 border border-violet-500/25 flex items-center justify-center">
-              <currentStep.icon size={20} className="text-violet-400" />
+        {/* Main Card */}
+        <div className="card p-6 sm:p-8 shadow-xl">
+          <div className="flex items-center gap-3.5 mb-6 pb-4 border-b border-slate-100">
+            <div className="w-11 h-11 rounded-2xl bg-[#EEF4FF] text-[#1565D8] flex items-center justify-center shrink-0">
+              <currentStep.icon size={21} />
             </div>
             <div>
-              <h2 className="font-display font-bold text-text-primary">{currentStep.title}</h2>
-              <p className="text-xs text-text-secondary">{currentStep.description}</p>
+              <h1 className="font-display font-bold text-xl text-slate-900">{currentStep.title}</h1>
+              <p className="text-xs sm:text-sm text-slate-500">{currentStep.description}</p>
             </div>
           </div>
 
           <AnimatePresence mode="wait">
             <motion.div
               key={step}
-              initial={{ opacity: 0, x: 20 }}
+              initial={reduced ? { opacity: 0 } : { opacity: 0, x: 16 }}
               animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              transition={{ duration: 0.25 }}
+              exit={reduced ? { opacity: 0 } : { opacity: 0, x: -16 }}
+              transition={{ duration: reduced ? 0.01 : 0.2 }}
             >
-              {/* Step 1 — Basic info */}
               {step === 1 && (
-                <div className="flex flex-col gap-4">
+                <div className="space-y-4">
+                  <Textarea
+                    label="Short bio"
+                    rows={3}
+                    maxLength={220}
+                    placeholder="Full-stack builder exploring AI agents and developer tools..."
+                    value={formData.bio}
+                    onChange={(e) => setFormData((f) => ({ ...f, bio: e.target.value }))}
+                    hint={`${formData.bio.length}/220 characters`}
+                  />
+
+                  <Select
+                    label="Country"
+                    value={formData.country}
+                    onChange={(e) => setFormData((f) => ({ ...f, country: e.target.value }))}
+                  >
+                    <option value="IN">India</option>
+                    <option value="US">United States</option>
+                    <option value="GB">United Kingdom</option>
+                    <option value="SG">Singapore</option>
+                    <option value="CA">Canada</option>
+                    <option value="AU">Australia</option>
+                    <option value="DE">Germany</option>
+                    <option value="Other">Other</option>
+                  </Select>
+
                   <div className="form-field">
-                    <label className="label">Short bio (optional)</label>
-                    <textarea
-                      placeholder="I'm a full-stack developer passionate about AI and open source..."
-                      rows={3}
-                      value={formData.bio}
-                      onChange={(e) => setFormData((f) => ({ ...f, bio: e.target.value }))}
-                      className="input resize-none"
-                      maxLength={200}
-                    />
-                    <p className="text-xs text-text-secondary/50 text-right mt-1">{formData.bio.length}/200</p>
-                  </div>
-                  <div className="form-field">
-                    <label className="label">Country</label>
-                    <select
-                      value={formData.country}
-                      onChange={(e) => setFormData((f) => ({ ...f, country: e.target.value }))}
-                      className="input"
-                    >
-                      <option value="">Select country</option>
-                      <option value="IN">India</option>
-                      <option value="US">United States</option>
-                      <option value="GB">United Kingdom</option>
-                      <option value="CA">Canada</option>
-                      <option value="AU">Australia</option>
-                      <option value="SG">Singapore</option>
-                      <option value="DE">Germany</option>
-                      <option value="Other">Other</option>
-                    </select>
-                  </div>
-                  <div className="form-field">
-                    <label className="label">Experience Level</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {EXPERIENCE_OPTIONS.map((opt) => (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => setFormData((f) => ({ ...f, experienceLevel: opt.value }))}
-                          className={`p-3 rounded-xl border text-left transition-all duration-200 ${
-                            formData.experienceLevel === opt.value
-                              ? "border-violet-500/50 bg-violet-500/10 text-violet-400"
-                              : "border-white/10 bg-white/3 text-text-secondary hover:border-white/20 hover:text-text-primary"
-                          }`}
-                        >
-                          <p className="text-sm font-semibold">{opt.label}</p>
-                          <p className="text-xs opacity-70 mt-0.5">{opt.description}</p>
-                        </button>
-                      ))}
+                    <span className="label">Experience Level</span>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      {EXPERIENCE_OPTIONS.map((opt) => {
+                        const active = formData.experienceLevel === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => setFormData((f) => ({ ...f, experienceLevel: opt.value }))}
+                            className={`p-3 rounded-xl border text-left transition-all ${
+                              active
+                                ? "border-[#1565D8] bg-[#EEF4FF] text-[#1565D8] ring-1 ring-[#1565D8]/20"
+                                : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                            }`}
+                          >
+                            <p className="text-sm font-bold">{opt.label}</p>
+                            <p className="text-xs text-slate-500 mt-0.5">{opt.description}</p>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* Step 2 — Background */}
               {step === 2 && (
-                <div className="flex flex-col gap-4">
-                  <div className="form-field">
-                    <label className="label">College / University (optional)</label>
-                    <input type="text" placeholder="e.g. IIT Delhi, NIT Warangal" value={formData.college} onChange={(e) => setFormData((f) => ({ ...f, college: e.target.value }))} className="input" />
+                <div className="space-y-4">
+                  <Input
+                    label="College / University"
+                    placeholder="e.g. Anna University, IIT Madras, VIT"
+                    value={formData.college}
+                    onChange={(e) => setFormData((f) => ({ ...f, college: e.target.value }))}
+                  />
+                  <Input
+                    label="Organization / Company (optional)"
+                    placeholder="e.g. Innovation Hacks, Acme Corp"
+                    value={formData.organization}
+                    onChange={(e) => setFormData((f) => ({ ...f, organization: e.target.value }))}
+                  />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <Input
+                      label="GitHub URL"
+                      type="url"
+                      placeholder="https://github.com/username"
+                      value={formData.githubUrl}
+                      onChange={(e) => setFormData((f) => ({ ...f, githubUrl: e.target.value }))}
+                    />
+                    <Input
+                      label="LinkedIn URL"
+                      type="url"
+                      placeholder="https://linkedin.com/in/username"
+                      value={formData.linkedinUrl}
+                      onChange={(e) => setFormData((f) => ({ ...f, linkedinUrl: e.target.value }))}
+                    />
                   </div>
-                  <div className="form-field">
-                    <label className="label">GitHub URL (optional)</label>
-                    <input type="url" placeholder="https://github.com/username" value={formData.githubUrl} onChange={(e) => setFormData((f) => ({ ...f, githubUrl: e.target.value }))} className="input" />
-                  </div>
-                  <div className="form-field">
-                    <label className="label">LinkedIn URL (optional)</label>
-                    <input type="url" placeholder="https://linkedin.com/in/username" value={formData.linkedinUrl} onChange={(e) => setFormData((f) => ({ ...f, linkedinUrl: e.target.value }))} className="input" />
-                  </div>
-                  <div className="flex items-center gap-3 p-4 rounded-xl bg-white/3 border border-white/8">
+                  <label className="flex items-start gap-3 p-4 rounded-2xl bg-[#EEF4FF]/60 border border-[#DCE9FF] cursor-pointer">
                     <input
-                      id="looking-for-team"
                       type="checkbox"
                       checked={formData.lookingForTeam}
                       onChange={(e) => setFormData((f) => ({ ...f, lookingForTeam: e.target.checked }))}
-                      className="w-4 h-4 rounded accent-violet-500"
+                      className="mt-1 w-4 h-4 rounded accent-[#1565D8]"
                     />
-                    <label htmlFor="looking-for-team" className="text-sm text-text-secondary cursor-pointer">
-                      <span className="text-text-primary font-medium">Looking for teammates</span>
-                      <br />
-                      <span className="text-xs">Show up in team discovery for hackathons</span>
-                    </label>
-                  </div>
+                    <span>
+                      <span className="text-sm font-semibold text-slate-900 block">Open to joining teams</span>
+                      <span className="text-xs text-slate-600">Appear in the Looking-for-Team board so builders can invite you.</span>
+                    </span>
+                  </label>
                 </div>
               )}
 
-              {/* Step 3 — Skills */}
               {step === 3 && (
-                <div>
-                  <p className="text-sm text-text-secondary mb-4">Select up to 10 technologies you work with:</p>
-                  <div className="flex flex-wrap gap-2 max-h-72 overflow-y-auto pr-1">
-                    {SKILL_OPTIONS.map((skill) => (
-                      <button
-                        key={skill}
-                        type="button"
-                        onClick={() => setFormData((f) => ({ ...f, skills: toggleItem(f.skills, skill, 10) }))}
-                        className={`skill-tag transition-all duration-150 ${
-                          formData.skills.includes(skill)
-                            ? "bg-violet-500/20 text-violet-400 border-violet-500/40"
-                            : ""
-                        }`}
-                      >
-                        {formData.skills.includes(skill) && <Check size={11} className="text-violet-400" />}
-                        {skill}
-                      </button>
-                    ))}
+                <div className="space-y-4">
+                  <Input
+                    placeholder="Filter skills..."
+                    leftAdornment={<Search size={15} />}
+                    value={skillSearch}
+                    onChange={(e) => setSkillSearch(e.target.value)}
+                  />
+                  <div className="flex flex-wrap gap-2 max-h-64 overflow-y-auto pr-1">
+                    {filteredSkills.map((skill) => {
+                      const active = formData.skills.includes(skill);
+                      return (
+                        <button
+                          key={skill}
+                          type="button"
+                          onClick={() => setFormData((f) => ({ ...f, skills: toggleItem(f.skills, skill, 10) }))}
+                          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all min-h-[38px] ${
+                            active
+                              ? "bg-[#1565D8] text-white border-[#1565D8] shadow-xs"
+                              : "bg-slate-50 text-slate-700 border-slate-200 hover:border-[#1565D8]/50"
+                          }`}
+                        >
+                          {active && <Check size={12} />}
+                          {skill}
+                        </button>
+                      );
+                    })}
                   </div>
-                  <p className="text-xs text-text-secondary/50 mt-3">{formData.skills.length}/10 selected</p>
+                  <p className="text-xs font-medium text-slate-500">{formData.skills.length}/10 skills selected</p>
                 </div>
               )}
 
-              {/* Step 4 — Interests */}
               {step === 4 && (
-                <div>
-                  <p className="text-sm text-text-secondary mb-4">What domains excite you? (Select all that apply)</p>
+                <div className="space-y-4">
+                  <p className="text-sm text-slate-600">Pick themes and tracks you care about:</p>
                   <div className="flex flex-wrap gap-2">
-                    {INTEREST_OPTIONS.map((interest) => (
-                      <button
-                        key={interest}
-                        type="button"
-                        onClick={() => setFormData((f) => ({ ...f, interests: toggleItem(f.interests, interest) }))}
-                        className={`skill-tag transition-all duration-150 ${
-                          formData.interests.includes(interest)
-                            ? "bg-aqua-400/20 text-aqua-400 border-aqua-400/40"
-                            : ""
-                        }`}
-                      >
-                        {formData.interests.includes(interest) && <Check size={11} className="text-aqua-400" />}
-                        {interest}
-                      </button>
-                    ))}
+                    {INTEREST_OPTIONS.map((interest) => {
+                      const active = formData.interests.includes(interest);
+                      return (
+                        <button
+                          key={interest}
+                          type="button"
+                          onClick={() => setFormData((f) => ({ ...f, interests: toggleItem(f.interests, interest) }))}
+                          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all min-h-[38px] ${
+                            active
+                              ? "bg-[#0284C7] text-white border-[#0284C7] shadow-xs"
+                              : "bg-slate-50 text-slate-700 border-slate-200 hover:border-[#0284C7]/50"
+                          }`}
+                        >
+                          {active && <Check size={12} />}
+                          {interest}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}
 
-              {/* Step 5 — Done */}
               {step === 5 && (
-                <div className="text-center py-4">
-                  <motion.div
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    transition={{ type: "spring", damping: 12 }}
-                    className="w-20 h-20 rounded-full bg-violet-gradient flex items-center justify-center mx-auto mb-5 shadow-violet"
-                  >
-                    <Rocket size={36} className="text-white" />
-                  </motion.div>
-                  <h3 className="text-xl font-display font-bold text-text-primary mb-2">
-                    You're ready, {user?.displayName?.split(" ")[0] ?? "Builder"}! 🎉
-                  </h3>
-                  <p className="text-sm text-text-secondary mb-6">
-                    Your profile is set up. Discover hackathons, find your team, and start building.
-                  </p>
-                  <div className="grid grid-cols-3 gap-3 text-center mb-2">
+                <div className="text-center py-4 space-y-5">
+                  <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-[#1565D8] to-[#0284C7] text-white flex items-center justify-center mx-auto shadow-brand">
+                    <Rocket size={34} />
+                  </div>
+                  <div>
+                    <h2 className="font-display font-bold text-2xl text-slate-900">
+                      You&apos;re ready, {(user?.displayName || firebaseUser?.displayName || "Builder").split(" ")[0]}!
+                    </h2>
+                    <p className="text-sm text-slate-600 mt-1.5">
+                      Your builder profile is ready. Explore live hackathons or host your own.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
                     {[
-                      { label: "Skills added", value: formData.skills.length },
+                      { label: "Skills", value: formData.skills.length },
                       { label: "Interests", value: formData.interests.length },
-                      { label: "Profile", value: "✓" },
+                      { label: "Team Ready", value: formData.lookingForTeam ? "Yes" : "Solo" },
                     ].map((s) => (
-                      <div key={s.label} className="p-3 rounded-xl bg-white/5 border border-white/8">
-                        <p className="text-xl font-display font-bold text-violet-400">{s.value}</p>
-                        <p className="text-[10px] text-text-secondary mt-0.5">{s.label}</p>
+                      <div key={s.label} className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
+                        <p className="font-display font-bold text-lg text-[#1565D8]">{s.value}</p>
+                        <p className="text-[11px] text-slate-500">{s.label}</p>
                       </div>
                     ))}
                   </div>
@@ -330,30 +396,59 @@ export default function OnboardingPage() {
             </motion.div>
           </AnimatePresence>
 
-          {/* Navigation */}
-          <div className="flex items-center justify-between mt-8">
-            <button
+          {/* Desktop / Tablet footer actions */}
+          <div className="hidden sm:flex items-center justify-between mt-8 pt-5 border-t border-slate-100">
+            <Button
+              variant="ghost"
+              disabled={step === 1 || saving}
               onClick={() => setStep((s) => Math.max(1, s - 1))}
-              disabled={step === 1}
-              className="btn-ghost disabled:opacity-30"
+              leftIcon={<ChevronLeft size={16} />}
             >
-              <ChevronLeft size={16} />
               Back
-            </button>
+            </Button>
 
             {step < STEPS.length ? (
-              <button onClick={() => setStep((s) => s + 1)} className="btn-primary">
+              <Button onClick={() => setStep((s) => s + 1)} rightIcon={<ChevronRight size={16} />}>
                 Continue
-                <ChevronRight size={16} />
-              </button>
+              </Button>
             ) : (
-              <button onClick={finish} disabled={saving} className="btn-aqua">
-                {saving ? <div className="w-4 h-4 border-2 border-midnight/40 border-t-midnight rounded-full animate-spin" /> : (<>Go to Dashboard <ChevronRight size={16} /></>)}
-              </button>
+              <Button onClick={() => saveAndContinue(false)} loading={saving} rightIcon={<Check size={16} />}>
+                Finish setup
+              </Button>
             )}
           </div>
         </div>
       </div>
+
+      {/* Sticky mobile bottom action bar */}
+      <div className="sm:hidden fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur-xl border-t border-slate-200 p-3 flex items-center gap-3 z-nav safe-bottom">
+        <Button
+          variant="secondary"
+          disabled={step === 1 || saving}
+          onClick={() => setStep((s) => Math.max(1, s - 1))}
+          leftIcon={<ChevronLeft size={16} />}
+          className="flex-1"
+        >
+          Back
+        </Button>
+        {step < STEPS.length ? (
+          <Button onClick={() => setStep((s) => s + 1)} rightIcon={<ChevronRight size={16} />} className="flex-1">
+            Next
+          </Button>
+        ) : (
+          <Button onClick={() => saveAndContinue(false)} loading={saving} className="flex-1">
+            Finish
+          </Button>
+        )}
+      </div>
     </div>
+  );
+}
+
+export default function OnboardingPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#F0F5FF] flex items-center justify-center"><div className="w-8 h-8 border-2 border-slate-300 border-t-[#1565D8] rounded-full animate-spin" /></div>}>
+      <OnboardingInner />
+    </Suspense>
   );
 }

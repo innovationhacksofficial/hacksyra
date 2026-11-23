@@ -62,3 +62,4 @@ export async function api<T = unknown>(
   }
   return json as T;
 }
+

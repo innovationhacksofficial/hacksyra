@@ -91,3 +91,4 @@ describe("canTransition", () => {
     expect(canTransition("completed", "registration_open")).toBe(false);
   });
 });
+

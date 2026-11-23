@@ -50,3 +50,4 @@ describe("ticket QR codes", () => {
     expect(safeEqualHex("a", "ab")).toBe(false);
   });
 });
+

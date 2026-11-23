@@ -97,3 +97,4 @@ export const isRazorpayServerConfigured = () =>
   isRealValue(serverEnv.razorpayKeyId) && isRealValue(serverEnv.razorpayKeySecret);
 
 export const isResendConfigured = () => isRealValue(serverEnv.resendApiKey);
+

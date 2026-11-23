@@ -116,3 +116,4 @@ export function isSubmissionOpenAt(h: TimelineDates, now = Date.now()): boolean 
   const close = toMillis(h.submissionCloseDate) ?? toMillis(h.endDate);
   return (open == null || now >= open) && (close == null || now < close);
 }
+

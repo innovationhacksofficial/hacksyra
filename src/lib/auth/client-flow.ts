@@ -60,3 +60,4 @@ export function authErrorMessage(err: unknown): string {
   if (err instanceof Error && err.message && !err.message.startsWith("Firebase:")) return err.message;
   return "Something went wrong. Please try again.";
 }
+

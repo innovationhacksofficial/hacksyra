@@ -64,3 +64,4 @@ describe("slug", () => {
     expect(k).toEqual(expect.arrayContaining(["climate", "cl", "cli", "hack", "react"]));
   });
 });
+

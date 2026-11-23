@@ -19,3 +19,4 @@ Product and engineering decisions made while building. New entries go at the bot
 | D13 | **Admin bootstrap via `ADMIN_EMAILS`** requires a **verified** email; otherwise use `npm run make-admin -- <email>`. | Stops someone pre-registering an admin's address with a password account. |
 | D14 | **Email OTP login removed**; the UI offers password, Google and (optionally) GitHub. LinkedIn/Microsoft buttons are removed. | OTP was never implemented; we don't fake auth methods. |
 | D15 | **Ticket QR = `ticketId.HMAC(TICKET_QR_SECRET)`**: verifiable at check-in, with no per-ticket secret stored in Firestore. | Matches "signed QR" while keeping the secret off the client. |
+

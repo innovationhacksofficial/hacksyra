@@ -40,3 +40,4 @@ export function safeNext(next: string | null | undefined): string | null {
     return null;
   }
 }
+

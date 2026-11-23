@@ -59,3 +59,4 @@ npm run seed               # once: demo users + hackathons
 npm run dev                # terminal 2
 ```
 Demo logins (emulator only): `organizer@hacksyra.test`, `participant@hacksyra.test`, `admin@hacksyra.test`, all with password `Password123!`.
+

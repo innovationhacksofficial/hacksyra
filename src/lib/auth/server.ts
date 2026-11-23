@@ -94,3 +94,4 @@ export async function requireAdmin(): Promise<SessionUser> {
   if (!isAdminRole(role)) redirect("/dashboard?denied=admin");
   return { ...user, role };
 }
+

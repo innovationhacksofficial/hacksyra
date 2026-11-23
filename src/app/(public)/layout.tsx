@@ -1,25 +1,14 @@
-"use client";
+import { SiteHeader } from "@/components/layout/SiteHeader";
+import { SiteFooter } from "@/components/layout/SiteFooter";
+import { MobileTabBar } from "@/components/layout/MobileTabBar";
 
-import { DevpostNavbar } from "@/components/layout/DevpostNavbar";
-import { DevpostFooter } from "@/components/layout/DevpostFooter";
-
-export default function PublicLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function PublicLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-white flex flex-col font-sans">
-      {/* Devpost Top Navigation Bar */}
-      <DevpostNavbar />
-
-      {/* Main Full-Width Content Area */}
-      <main className="flex-1 pt-[104px] bg-white">
-        {children}
-      </main>
-
-      {/* Devpost 4-Column Footer */}
-      <DevpostFooter />
+      <SiteHeader />
+      <main className="flex-1 pt-[64px] md:pt-[68px] pb-16 md:pb-0">{children}</main>
+      <SiteFooter />
+      <MobileTabBar />
     </div>
   );
 }

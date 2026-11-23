@@ -135,3 +135,4 @@ export function useLiveDoc<T>(
     notConfigured,
   };
 }
+

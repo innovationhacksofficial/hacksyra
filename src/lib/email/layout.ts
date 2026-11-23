@@ -54,3 +54,4 @@ Manage email preferences in <a href="${app}/dashboard/settings" style="color:#15
 </td></tr></table>
 </body></html>`;
 }
+

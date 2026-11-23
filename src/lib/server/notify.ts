@@ -68,3 +68,4 @@ export async function notifyAdmins(input: Omit<NotifyInput, "userId">): Promise<
     .get();
   await Promise.all(snap.docs.map((d) => notify({ ...input, userId: d.id })));
 }
+

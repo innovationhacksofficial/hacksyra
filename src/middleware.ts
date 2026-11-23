@@ -50,3 +50,4 @@ export const config = {
     "/((?!api|_next/static|_next/image|favicon.ico|icon.png|logos|images|robots.txt|sitemap.xml|.*\\.(?:png|jpg|jpeg|svg|webp|gif|ico)$).*)",
   ],
 };
+

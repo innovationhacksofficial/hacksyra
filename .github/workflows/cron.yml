@@ -21,3 +21,4 @@ jobs:
           code=$(curl -sS -o response.json -w "%{http_code}" -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/tick")
           cat response.json; echo
           test "$code" -eq 200
+

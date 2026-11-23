@@ -37,3 +37,4 @@ export function aggregateScores(evals: { totalScore: number; hasConflict?: boole
   if (!valid.length) return null;
   return Math.round((valid.reduce((s, e) => s + e.totalScore, 0) / valid.length) * 100) / 100;
 }
+

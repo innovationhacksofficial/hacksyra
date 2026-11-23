@@ -34,3 +34,4 @@ export async function audit(input: AuditInput): Promise<void> {
     console.error("[audit] failed to write audit log", input.action, e);
   }
 }
+

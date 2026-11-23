@@ -42,3 +42,4 @@ export function initAdmin() {
   db.settings({ ignoreUndefinedProperties: true });
   return { auth: getAuth(), db };
 }
+

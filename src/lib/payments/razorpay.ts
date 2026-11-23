@@ -59,3 +59,4 @@ export function verifyTicketCode(code: string, secret: string = serverEnv.ticket
   const expected = hmacSha256Hex(secret, `ticket:${id}`).slice(0, 32);
   return safeEqualHex(expected, sig) ? id : null;
 }
+

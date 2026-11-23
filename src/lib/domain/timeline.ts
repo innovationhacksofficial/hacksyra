@@ -91,3 +91,4 @@ export function validateTimeline(t: TimelineInput, opts: { now?: number; require
   const seen = new Set<string>();
   return issues.filter((i) => (seen.has(i.field) ? false : (seen.add(i.field), true)));
 }
+
