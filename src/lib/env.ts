@@ -5,7 +5,7 @@
  * into the client bundle — do not refactor these into dynamic lookups.
  */
 
-const PLACEHOLDER = /^(your[-_]|rzp_test_your|re_your|sk-your|pk_test_your|sk_test_your|whsec_your)|dummy|changeme|xxxx/i;
+const PLACEHOLDER = /^(your[-_]|rzp_test_your|re_your|sk-your|pk_test_your|sk_test_your|whsec_your)|your[-_]project|your_key_here|dummy|changeme|xxxx/i;
 
 export function isRealValue(v: string | undefined | null): v is string {
   return typeof v === "string" && v.trim().length > 0 && !PLACEHOLDER.test(v.trim());

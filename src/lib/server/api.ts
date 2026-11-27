@@ -51,7 +51,16 @@ export function errorResponse(err: unknown): NextResponse {
   }
   if (err instanceof AdminNotConfiguredError) {
     console.error(err.message);
-    return NextResponse.json({ error: { code: "not_configured", message: "The server database is not configured yet." } }, { status: 503 });
+    return NextResponse.json(
+      {
+        error: {
+          code: "not_configured",
+          message:
+            "Firebase Admin SDK is not configured on the server yet. Add FIREBASE_ADMIN_CLIENT_EMAIL and FIREBASE_ADMIN_PRIVATE_KEY to .env.local.",
+        },
+      },
+      { status: 503 }
+    );
   }
   console.error("[api] unhandled error", err);
   return NextResponse.json({ error: { code: "internal", message: "Something went wrong. Please try again." } }, { status: 500 });
@@ -74,7 +83,8 @@ export async function resolveUser(req: NextRequest): Promise<SessionUser | null>
         picture: d.picture,
         role: normalizeRole(d.role),
       };
-    } catch {
+    } catch (e) {
+      if (e instanceof AdminNotConfiguredError) throw e;
       return null;
     }
   }
@@ -91,7 +101,8 @@ export async function resolveUser(req: NextRequest): Promise<SessionUser | null>
       picture: d.picture,
       role: normalizeRole(d.role),
     };
-  } catch {
+  } catch (e) {
+    if (e instanceof AdminNotConfiguredError) throw e;
     return null;
   }
 }

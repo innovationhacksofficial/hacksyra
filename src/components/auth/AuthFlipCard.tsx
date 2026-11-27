@@ -291,11 +291,12 @@ export function AuthFlipCard({ initialMode }: { initialMode: "login" | "signup" 
             <div className="space-y-4">
               {oauthButtons("Continue")}
 
-              <div className="relative flex items-center justify-center py-1">
-                <div className="border-t border-slate-200 w-full" />
-                <span className="bg-white px-3 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              <div className="flex items-center gap-3 py-1">
+                <div className="flex-1 border-t border-slate-200" />
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                   or with email
                 </span>
+                <div className="flex-1 border-t border-slate-200" />
               </div>
 
               {mode === "login" && errorBanner}
@@ -439,11 +440,12 @@ export function AuthFlipCard({ initialMode }: { initialMode: "login" | "signup" 
             <div className="space-y-3.5">
               {oauthButtons("Sign up")}
 
-              <div className="relative flex items-center justify-center py-0.5">
-                <div className="border-t border-slate-200 w-full" />
-                <span className="bg-white px-3 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              <div className="flex items-center gap-3 py-0.5">
+                <div className="flex-1 border-t border-slate-200" />
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                   or with email
                 </span>
+                <div className="flex-1 border-t border-slate-200" />
               </div>
 
               {mode === "signup" && errorBanner}
